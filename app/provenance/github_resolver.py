@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Optional
 
 from github import Github, GithubException, Commit
+from github.Auth import Token
 
 AGENT_TRAILER_PATTERN = re.compile(r"^Agent-ID:\s*(?P<agent>[^\s]+)", re.IGNORECASE)
 CO_AUTHOR_PATTERN = re.compile(r"Co-authored-by:\s*(?P<author>.+)", re.IGNORECASE)
@@ -23,10 +24,11 @@ class GitHubProvenanceResolver:
         agent_label_prefix: str = "agent:",
     ) -> None:
         self._agent_label_prefix = agent_label_prefix.lower()
+        auth = Token(token)
         if base_url:
-            self._client = Github(login_or_token=token, base_url=base_url.rstrip("/"))
+            self._client = Github(auth=auth, base_url=base_url.rstrip("/"))
         else:
-            self._client = Github(login_or_token=token)
+            self._client = Github(auth=auth)
 
     def resolve_agent(
         self,
@@ -41,6 +43,8 @@ class GitHubProvenanceResolver:
             agent_id, session_id = self._from_commit(repo_full_name, commit_sha)
         if not agent_id and pr_number:
             agent_id = self._from_pr_labels(repo_full_name, int(pr_number))
+        if not agent_id and pr_number:
+            agent_id = self._from_pr_discussion(repo_full_name, int(pr_number))
         return agent_id, session_id
 
     @lru_cache(maxsize=256)
@@ -83,4 +87,23 @@ class GitHubProvenanceResolver:
             lower = label.lower()
             if lower.startswith(self._agent_label_prefix):
                 return label.split(":", 1)[-1].strip()
+        return None
+
+    @lru_cache(maxsize=256)
+    def _fetch_pr_comments(self, repo_full_name: str, pr_number: int) -> list[str]:
+        try:
+            repo = self._client.get_repo(repo_full_name)
+            pr = repo.get_pull(pr_number)
+            comments = [comment.body or "" for comment in pr.get_issue_comments()]
+            comments.extend((review.body or "") for review in pr.get_reviews())
+            return comments
+        except GithubException:
+            return []
+
+    def _from_pr_discussion(self, repo_full_name: str, pr_number: int) -> Optional[str]:
+        for body in self._fetch_pr_comments(repo_full_name, pr_number):
+            for line in body.splitlines():
+                match = AGENT_TRAILER_PATTERN.match(line.strip())
+                if match:
+                    return match.group("agent")
         return None

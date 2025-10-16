@@ -1,7 +1,13 @@
 """Telemetry utilities for exporting analytics events and metrics."""
 
 from .event_sink import EventSink, FileEventSink, NullEventSink, sink_from_settings
-from .metrics import configure_metrics, record_analysis_duration, record_analysis_findings, increment_analysis_ingestion
+from .metrics import (
+    configure_metrics,
+    record_analysis_duration,
+    record_analysis_findings,
+    increment_analysis_ingestion,
+    shutdown_metrics,
+)
 
 __all__ = [
     "EventSink",
@@ -12,4 +18,5 @@ __all__ = [
     "record_analysis_duration",
     "record_analysis_findings",
     "increment_analysis_ingestion",
+    "shutdown_metrics",
 ]

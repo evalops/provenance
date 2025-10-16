@@ -37,3 +37,16 @@ def test_resolver_falls_back_to_pr_labels(monkeypatch):
     monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_pr_labels", lambda self, repo, pr: ["Agent: gemini-pro"])
     agent, _ = resolver.resolve_agent("acme/repo", "77", None)
     assert agent == "gemini-pro"
+
+
+def test_resolver_uses_pr_comments(monkeypatch):
+    resolver = GitHubProvenanceResolver(token="token")
+    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_commit", lambda self, repo, sha: None)
+    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_pr_labels", lambda self, repo, pr: [])
+    monkeypatch.setattr(
+        GitHubProvenanceResolver,
+        "_fetch_pr_comments",
+        lambda self, repo, pr: ["LGTM\nAgent-ID: gemma-7b"],
+    )
+    agent, _ = resolver.resolve_agent("acme/repo", "77", None)
+    assert agent == "gemma-7b"

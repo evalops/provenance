@@ -16,6 +16,7 @@ _logger = logging.getLogger(__name__)
 
 _metrics_enabled = False
 _meter = None
+_provider: MeterProvider | None = None
 _analysis_duration_hist = None
 _analysis_findings_counter = None
 _analysis_ingestion_counter = None
@@ -24,7 +25,7 @@ _analysis_ingestion_counter = None
 def configure_metrics() -> None:
     """Initialise the metrics provider if enabled via settings."""
 
-    global _metrics_enabled, _meter, _analysis_duration_hist, _analysis_findings_counter, _analysis_ingestion_counter
+    global _metrics_enabled, _meter, _analysis_duration_hist, _analysis_findings_counter, _analysis_ingestion_counter, _provider
 
     if not settings.otel_enabled:
         return
@@ -32,15 +33,35 @@ def configure_metrics() -> None:
         return
 
     exporter_name = settings.otel_exporter.lower().strip()
+    metric_readers = []
+
     if exporter_name == "console":
         exporter = ConsoleMetricExporter()
+        metric_readers.append(PeriodicExportingMetricReader(exporter))
+    elif exporter_name == "prometheus":
+        try:
+            from opentelemetry.exporter.prometheus import PrometheusMetricReader  # type: ignore
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "Prometheus exporter selected but opentelemetry-exporter-prometheus is not installed."
+            ) from exc
+        metric_readers.append(PrometheusMetricReader(port=settings.otel_prometheus_port))
+    elif exporter_name == "otlp":
+        try:
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter  # type: ignore
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "OTLP exporter selected but opentelemetry-exporter-otlp is not installed."
+            ) from exc
+        endpoint = settings.otel_otlp_endpoint
+        exporter = OTLPMetricExporter(endpoint=endpoint) if endpoint else OTLPMetricExporter()
+        metric_readers.append(PeriodicExportingMetricReader(exporter))
     else:
         _logger.warning("Unsupported OTEL exporter '%s'; defaulting to console", exporter_name)
-        exporter = ConsoleMetricExporter()
+        metric_readers.append(PeriodicExportingMetricReader(ConsoleMetricExporter()))
 
-    reader = PeriodicExportingMetricReader(exporter)
-    provider = MeterProvider(metric_readers=[reader], resource=Resource.create({"service.name": "provenance"}))
-    metrics.set_meter_provider(provider)
+    _provider = MeterProvider(metric_readers=metric_readers, resource=Resource.create({"service.name": "provenance"}))
+    metrics.set_meter_provider(_provider)
     _meter = metrics.get_meter("provenance")
     _analysis_duration_hist = _meter.create_histogram(
         name="provenance.analysis.duration",
@@ -73,3 +94,15 @@ def record_analysis_findings(count: int) -> None:
 def increment_analysis_ingestion() -> None:
     if _metrics_enabled and _analysis_ingestion_counter is not None:
         _analysis_ingestion_counter.add(1)
+
+
+def shutdown_metrics() -> None:
+    global _metrics_enabled, _provider
+    if _metrics_enabled and _provider is not None:
+        try:
+            _provider.shutdown()
+        except Exception:  # pragma: no cover - defensive
+            _logger.exception("Failed to shutdown metrics provider")
+        finally:
+            _metrics_enabled = False
+            _provider = None

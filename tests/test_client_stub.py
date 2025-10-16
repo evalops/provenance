@@ -4,7 +4,9 @@ import json
 
 import httpx
 
-from clients.python import AnalysisRequest, ProvenanceClient
+import asyncio
+
+from clients.python import AnalysisRequest, ProvenanceClient, AsyncProvenanceClient
 
 
 def test_client_submit_analysis_payload():
@@ -48,3 +50,22 @@ def test_client_summary_queries():
     assert params_captured["time_window"] == "3d"
     assert params_captured["category"] == "sqli"
     assert params_captured["agent_id"] == "claude"
+
+
+def test_async_client_calls():
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"status": "ok"})
+
+    transport = httpx.MockTransport(handler)
+    
+    async def main():
+        async with AsyncProvenanceClient("http://example.com/v1", transport=transport) as client:
+            response = await client.healthcheck()
+            return response
+
+    response = asyncio.run(main())
+    assert captured["url"].endswith("/healthz")
+    assert response["status"] == "ok"

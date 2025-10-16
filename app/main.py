@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.routers import analysis, analytics, governance
-from app.telemetry import configure_metrics
+from app.telemetry import configure_metrics, shutdown_metrics
 from app.dependencies import get_event_sink
 
 
-def create_app() -> FastAPI:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     configure_metrics()
+    yield
+    sink = get_event_sink()
+    if hasattr(sink, "close"):
+        sink.close()
+    shutdown_metrics()
+
+
+def create_app() -> FastAPI:
     app = FastAPI(
         title="Provenance & Risk Analytics",
         description="Tracks agent attribution, computes risk analytics, and enforces governance policies.",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     app.include_router(analysis.router)
@@ -24,12 +36,6 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["health"])
     def healthcheck() -> dict[str, str]:
         return {"status": "ok"}
-
-    @app.on_event("shutdown")
-    async def shutdown_telemetry() -> None:
-        sink = get_event_sink()
-        if hasattr(sink, "close"):
-            sink.close()
 
     return app
 

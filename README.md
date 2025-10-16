@@ -74,6 +74,8 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_TIMESERIES_BATCH_SIZE` | Buffer size before flushing warehouse writes | `25` |
 | `PROVENANCE_OTEL_ENABLED` | Enable OpenTelemetry metrics export | `false` |
 | `PROVENANCE_OTEL_EXPORTER` | Metrics exporter target (`console`) | `console` |
+| `PROVENANCE_OTEL_OTLP_ENDPOINT` | OTLP metrics endpoint (when exporter=`otlp`) | *(unset)* |
+| `PROVENANCE_OTEL_PROMETHEUS_PORT` | Prometheus exporter port (when exporter=`prometheus`) | `9464` |
 | `PROVENANCE_POLICY_WARN_THRESHOLDS` | JSON map of category warn thresholds | `{}` |
 | `PROVENANCE_POLICY_BLOCK_THRESHOLDS` | JSON map of category block thresholds | `{}` |
 | `PROVENANCE_DETECTOR_MODULE_PATHS` | JSON array of detector module paths to auto-load | `[]` |
@@ -94,7 +96,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - The JSON results are mapped back to the originating changed lines so findings retain repo/PR/file/line attribution.
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
-- When GitHub credentials are configured, the service automatically inspects commit trailers and PR labels to fill missing agent attribution (see `app/provenance/github_resolver.py`).
+- When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, and discussion comments to fill missing agent attribution (see `app/provenance/github_resolver.py`).
 
 ## API Surface
 
@@ -150,6 +152,7 @@ Example ingestion payload:
 - Switch `PROVENANCE_TIMESERIES_BACKEND` to `bigquery` or `snowflake` and provide the project/database/dataset/table knobs to buffer events for warehouse loaders.
 - Point the backend to `off` to disable exports entirely.
 - Install warehouse dependencies when needed: `uv sync --group warehouse` (installs `snowflake-connector-python`).
+- Install observability exporters via `uv sync --group observability` when enabling OTLP (install `opentelemetry-exporter-otlp`). For Prometheus support, install `opentelemetry-exporter-prometheus` manually.
 - Set `PROVENANCE_OTEL_ENABLED=true` to emit OpenTelemetry metrics (currently using the console exporter by default).
 - Event payloads include per-agent code volume, churn rates, complexity heuristics, and counts by finding category/severity.
 

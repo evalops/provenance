@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     timeseries_batch_size: int = 25
     otel_enabled: bool = False
     otel_exporter: str = "console"
+    otel_otlp_endpoint: str | None = None
+    otel_prometheus_port: int = 9464
     policy_warn_thresholds: dict[str, int] = Field(default_factory=dict)
     policy_block_thresholds: dict[str, int] = Field(default_factory=dict)
     detector_module_paths: list[str] = Field(default_factory=list)
