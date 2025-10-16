@@ -18,25 +18,28 @@ def test_resolver_extracts_agent_from_commit_trailer(monkeypatch):
         "_fetch_commit",
         lambda self, repo, sha: StubCommit("Fix bug\nAgent-ID: claude-3-opus"),
     )
-    agent, session = resolver.resolve_agent("acme/repo", "42", "abc123")
+    agent, session, evidence = resolver.resolve_agent("acme/repo", "42", "abc123")
     assert agent == "claude-3-opus"
     assert session is None
+    assert evidence["agent_id"] == "claude-3-opus"
 
 
 def test_resolver_uses_coauthor(monkeypatch):
     resolver = GitHubProvenanceResolver(token="token")
     message = "Refactor\nCo-authored-by: GitHub Copilot <copilot@example.com>"
     monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_commit", lambda self, repo, sha: StubCommit(message))
-    agent, _ = resolver.resolve_agent("acme/repo", None, "def456")
+    agent, _, evidence = resolver.resolve_agent("acme/repo", None, "def456")
     assert agent == "github-copilot"
+    assert evidence["agent_id"] == "github-copilot"
 
 
 def test_resolver_falls_back_to_pr_labels(monkeypatch):
     resolver = GitHubProvenanceResolver(token="token", agent_label_prefix="agent:")
     monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_commit", lambda self, repo, sha: None)
     monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_pr_labels", lambda self, repo, pr: ["Agent: gemini-pro"])
-    agent, _ = resolver.resolve_agent("acme/repo", "77", None)
+    agent, _, evidence = resolver.resolve_agent("acme/repo", "77", None)
     assert agent == "gemini-pro"
+    assert evidence["agent_id"] == "gemini-pro"
 
 
 def test_resolver_uses_pr_comments(monkeypatch):
@@ -48,8 +51,9 @@ def test_resolver_uses_pr_comments(monkeypatch):
         "_fetch_pr_comments",
         lambda self, repo, pr: ["LGTM\nAgent-ID: gemma-7b"],
     )
-    agent, _ = resolver.resolve_agent("acme/repo", "77", None)
+    agent, _, evidence = resolver.resolve_agent("acme/repo", "77", None)
     assert agent == "gemma-7b"
+    assert evidence["agent_id"] == "gemma-7b"
 
 
 def test_review_stats(monkeypatch):

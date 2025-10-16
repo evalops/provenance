@@ -141,7 +141,7 @@ class AnalysisService:
             provenance_marker=payload.attribution.provenance_marker,
         )
         if not attribution.agent.agent_id:
-            agent_id, session_id = self._resolve_agent(
+            agent_id, session_id, evidence = self._resolve_agent(
                 repo=request.repo,
                 pr_number=request.pr_number,
                 commit_sha=attribution.commit_sha,
@@ -150,6 +150,8 @@ class AnalysisService:
                 attribution.agent.agent_id = agent_id
             if session_id:
                 attribution.agent_session_id = session_id
+            if evidence:
+                attribution.provenance_marker = str(evidence)
         return ChangedLine(
             analysis_id=analysis_id,
             repo_id=request.repo,
@@ -172,9 +174,9 @@ class AnalysisService:
         repo: str,
         pr_number: str,
         commit_sha: str | None,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, dict]:
         if not self._github_resolver:
-            return None, None
+            return None, None, {}
         return self._github_resolver.resolve_agent(repo, pr_number, commit_sha)
 
     def list_findings(self, analysis_id: str) -> list[Finding]:

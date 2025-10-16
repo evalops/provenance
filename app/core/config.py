@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     github_base_url: str | None = None
     github_agent_label_prefix: str = "agent:"
     github_cache_ttl_seconds: int = 300
+    github_agent_map: dict[str, str] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

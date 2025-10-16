@@ -23,6 +23,7 @@ class GitHubProvenanceResolver:
         base_url: str | None = None,
         agent_label_prefix: str = "agent:",
         cache_ttl_seconds: int = 300,
+        agent_map: dict[str, str] | None = None,
     ) -> None:
         self._agent_label_prefix = agent_label_prefix.lower()
         auth = Token(token)
@@ -31,6 +32,7 @@ class GitHubProvenanceResolver:
         else:
             self._client = Github(auth=auth)
         self._cache_ttl = max(cache_ttl_seconds, 30)
+        self._agent_map = {k.lower(): v for k, v in (agent_map or {}).items()}
         self._commit_cache: dict[tuple[str, str], tuple[float, Optional[Commit.Commit]]] = {}
         self._label_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         self._comment_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
@@ -42,17 +44,31 @@ class GitHubProvenanceResolver:
         repo_full_name: str,
         pr_number: str | None,
         commit_sha: str | None,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[Optional[str], Optional[str], dict]:
         agent_id: Optional[str] = None
         session_id: Optional[str] = None
+        evidence: dict = {}
 
         if commit_sha:
-            agent_id, session_id = self._from_commit(repo_full_name, commit_sha)
+            agent_id, session_id, commit_evidence = self._from_commit(repo_full_name, commit_sha)
+            evidence.setdefault("sources", []).append(commit_evidence)
         if not agent_id and pr_number:
-            agent_id = self._from_pr_labels(repo_full_name, int(pr_number))
+            label_agent, label_evidence = self._from_pr_labels(repo_full_name, int(pr_number))
+            if label_agent:
+                agent_id = label_agent
+            evidence.setdefault("sources", []).append(label_evidence)
         if not agent_id and pr_number:
-            agent_id = self._from_pr_discussion(repo_full_name, int(pr_number))
-        return agent_id, session_id
+            discussion_agent, discussion_evidence = self._from_pr_discussion(repo_full_name, int(pr_number))
+            if discussion_agent:
+                agent_id = discussion_agent
+            evidence.setdefault("sources", []).append(discussion_evidence)
+        if not agent_id and pr_number:
+            body_agent, body_evidence = self._from_pr_body(repo_full_name, int(pr_number))
+            if body_agent:
+                agent_id = body_agent
+            evidence.setdefault("sources", []).append(body_evidence)
+        evidence["agent_id"] = agent_id
+        return agent_id, session_id, evidence
 
     def review_stats(self, repo_full_name: str, pr_number: int) -> dict[str, int] | None:
         comments = self._fetch_pr_comments(repo_full_name, pr_number)
@@ -82,23 +98,24 @@ class GitHubProvenanceResolver:
         self._commit_cache[key] = (now + self._cache_ttl, commit)
         return commit
 
-    def _from_commit(self, repo_full_name: str, sha: str) -> tuple[Optional[str], Optional[str]]:
+    def _from_commit(self, repo_full_name: str, sha: str) -> tuple[Optional[str], Optional[str], dict]:
         commit = self._fetch_commit(repo_full_name, sha)
         if not commit:
-            return None, None
+            return None, None, {"source": "commit", "reason": "not_found"}
         message = commit.commit.message or ""
         for line in message.splitlines():
             match = AGENT_TRAILER_PATTERN.match(line.strip())
             if match:
-                return match.group("agent"), None
+                return match.group("agent"), None, {"source": "commit_trailer", "line": line.strip()}
         for line in message.splitlines():
             match = CO_AUTHOR_PATTERN.match(line.strip())
             if match and "copilot" in match.group("author").lower():
-                return "github-copilot", None
+                return "github-copilot", None, {"source": "co_author", "value": match.group("author")}
         author_login = getattr(commit.author, "login", "") or ""
         if author_login:
-            return author_login, None
-        return None, None
+            mapped = self._agent_map.get(author_login.lower())
+            return mapped or author_login, None, {"source": "commit_author", "value": author_login}
+        return None, None, {"source": "commit", "reason": "no_author"}
 
     def _fetch_pr_labels(self, repo_full_name: str, pr_number: int) -> list[str]:
         key = (repo_full_name, pr_number)
@@ -115,12 +132,16 @@ class GitHubProvenanceResolver:
         self._label_cache[key] = (now + self._cache_ttl, labels)
         return labels
 
-    def _from_pr_labels(self, repo_full_name: str, pr_number: int) -> Optional[str]:
-        for label in self._fetch_pr_labels(repo_full_name, pr_number):
+    def _from_pr_labels(self, repo_full_name: str, pr_number: int) -> tuple[Optional[str], dict]:
+        labels = self._fetch_pr_labels(repo_full_name, pr_number)
+        for label in labels:
             lower = label.lower()
             if lower.startswith(self._agent_label_prefix):
-                return label.split(":", 1)[-1].strip()
-        return None
+                return label.split(":", 1)[-1].strip(), {"source": "label", "label": label}
+            mapped = self._agent_map.get(lower)
+            if mapped:
+                return mapped, {"source": "label_map", "label": label}
+        return None, {"source": "label", "labels": labels}
 
     def _fetch_pr_comments(self, repo_full_name: str, pr_number: int) -> list[str]:
         key = (repo_full_name, pr_number)
@@ -168,18 +189,38 @@ class GitHubProvenanceResolver:
         self._review_event_cache[key] = (now + self._cache_ttl, events)
         return events
 
-    def _from_pr_discussion(self, repo_full_name: str, pr_number: int) -> Optional[str]:
+    def _from_pr_discussion(self, repo_full_name: str, pr_number: int) -> tuple[Optional[str], dict]:
         for body in self._fetch_pr_comments(repo_full_name, pr_number):
             for line in body.splitlines():
                 match = AGENT_TRAILER_PATTERN.match(line.strip())
                 if match:
-                    return match.group("agent")
+                    return match.group("agent"), {"source": "comment", "line": line.strip()}
         for author in self._fetch_review_authors(repo_full_name, pr_number):
             lower = author.lower()
             if "copilot" in lower:
-                return "github-copilot"
+                return "github-copilot", {"source": "reviewer", "value": author}
+            mapped = self._agent_map.get(lower)
+            if mapped:
+                return mapped, {"source": "reviewer_map", "value": author}
             if any(key in lower for key in ("claude", "gemini", "gpt", "bard")):
-                return lower
+                return lower, {"source": "reviewer_heuristic", "value": author}
             if lower.endswith("-bot"):
-                return lower
-        return None
+                return lower, {"source": "reviewer_bot", "value": author}
+        return None, {"source": "discussion", "reason": "no_match"}
+
+    def _from_pr_body(self, repo_full_name: str, pr_number: int) -> tuple[Optional[str], dict]:
+        try:
+            repo = self._client.get_repo(repo_full_name)
+            pr = repo.get_pull(pr_number)
+            body = pr.body or ""
+        except GithubException:
+            return None, {"source": "body", "reason": "error"}
+        for line in body.splitlines():
+            match = AGENT_TRAILER_PATTERN.match(line.strip())
+            if match:
+                return match.group("agent"), {"source": "body", "line": line.strip()}
+        lower_body = body.lower()
+        for key, mapped in self._agent_map.items():
+            if key in lower_body:
+                return mapped, {"source": "body_map", "value": key}
+        return None, {"source": "body", "reason": "no_match"}

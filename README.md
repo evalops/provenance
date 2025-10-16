@@ -83,6 +83,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_BASE_URL` | GitHub enterprise base URL (optional) | *(unset)* |
 | `PROVENANCE_GITHUB_AGENT_LABEL_PREFIX` | PR label prefix used to infer agent IDs | `agent:` |
 | `PROVENANCE_GITHUB_CACHE_TTL_SECONDS` | Cache TTL (seconds) for GitHub metadata lookups | `300` |
+| `PROVENANCE_GITHUB_AGENT_MAP` | JSON map of GitHub logins/keywords to agent IDs | `{}` |
 
 ## Detection with Semgrep
 
@@ -147,6 +148,7 @@ Example ingestion payload:
 
 - `/v1/analytics/summary` now supports additional metrics: `code_volume`, `code_churn_rate`, and `avg_line_complexity` in addition to `risk_rate` and `provenance_coverage`.
 - `/v1/analytics/agents/behavior` returns composite snapshots (volume, churn rate, heuristic complexity, and top vulnerability categories per agent) to power comparison dashboards.
+- Review-focused metrics (`review_comments`, `unique_reviewers`) leverage GitHub PR data when credentials are supplied.
 - Use `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` or query parameters such as `?time_window=14d` to track longer horizons and compare agents.
 
 ## Telemetry Export
