@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  UV_LINK_MODE: copy
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v1
+
+      - name: Sync dependencies
+        run: uv sync --group dashboard --group warehouse
+
+      - name: Run tests
+        run: uv run -- pytest
+
+      - name: Streamlit smoke
+        run: uv run -- python -m py_compile dashboards/agent_dashboard.py
