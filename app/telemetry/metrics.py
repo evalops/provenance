@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 from opentelemetry import metrics
@@ -20,12 +21,14 @@ _provider: MeterProvider | None = None
 _analysis_duration_hist = None
 _analysis_findings_counter = None
 _analysis_ingestion_counter = None
+_prometheus_generate = None
+_prometheus_content_type = "text/plain; version=0.0.4"
 
 
 def configure_metrics() -> None:
     """Initialise the metrics provider if enabled via settings."""
 
-    global _metrics_enabled, _meter, _analysis_duration_hist, _analysis_findings_counter, _analysis_ingestion_counter, _provider
+    global _metrics_enabled, _meter, _analysis_duration_hist, _analysis_findings_counter, _analysis_ingestion_counter, _provider, _prometheus_generate
 
     if not settings.otel_enabled:
         return
@@ -41,11 +44,13 @@ def configure_metrics() -> None:
     elif exporter_name == "prometheus":
         try:
             from opentelemetry.exporter.prometheus import PrometheusMetricReader  # type: ignore
+            import prometheus_client  # type: ignore
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError(
-                "Prometheus exporter selected but opentelemetry-exporter-prometheus is not installed."
+                "Prometheus exporter selected but opentelemetry-exporter-prometheus / prometheus-client are not installed."
             ) from exc
         metric_readers.append(PrometheusMetricReader(port=settings.otel_prometheus_port))
+        _prometheus_generate = prometheus_client.generate_latest
     elif exporter_name == "otlp":
         try:
             from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter  # type: ignore
@@ -106,3 +111,9 @@ def shutdown_metrics() -> None:
         finally:
             _metrics_enabled = False
             _provider = None
+
+
+def collect_prometheus_metrics() -> tuple[bytes, str]:
+    if not _metrics_enabled or _prometheus_generate is None:
+        raise RuntimeError("Prometheus exporter is not enabled")
+    return _prometheus_generate(), _prometheus_content_type

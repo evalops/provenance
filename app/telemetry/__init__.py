@@ -7,6 +7,7 @@ from .metrics import (
     record_analysis_findings,
     increment_analysis_ingestion,
     shutdown_metrics,
+    collect_prometheus_metrics,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "record_analysis_findings",
     "increment_analysis_ingestion",
     "shutdown_metrics",
+    "collect_prometheus_metrics",
 ]

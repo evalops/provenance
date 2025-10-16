@@ -82,6 +82,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_TOKEN` | Personal access token for GitHub API enrichment | *(unset)* |
 | `PROVENANCE_GITHUB_BASE_URL` | GitHub enterprise base URL (optional) | *(unset)* |
 | `PROVENANCE_GITHUB_AGENT_LABEL_PREFIX` | PR label prefix used to infer agent IDs | `agent:` |
+| `PROVENANCE_GITHUB_CACHE_TTL_SECONDS` | Cache TTL (seconds) for GitHub metadata lookups | `300` |
 
 ## Detection with Semgrep
 
@@ -96,7 +97,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - The JSON results are mapped back to the originating changed lines so findings retain repo/PR/file/line attribution.
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
-- When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, and discussion comments to fill missing agent attribution (see `app/provenance/github_resolver.py`).
+- When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, review comments, and reviewer identities to fill missing agent attribution (see `app/provenance/github_resolver.py`).
 - Built-in heuristics now include a Python import detector that flags risky modules (e.g., `subprocess`, `pickle`); extend this pattern with your own detectors via modular hooks.
 
 ## API Surface
@@ -109,6 +110,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `/v1/analysis/{id}/decision` | `GET` | Fetch the governance decision (allow/block/warn) with evidence |
 | `/v1/analytics/summary` | `GET` | Retrieve aggregated KPIs (risk rate, provenance, volume, churn, complexity, etc.) |
 | `/v1/analytics/agents/behavior` | `GET` | Retrieve composite behavioral snapshots for each agent |
+| `/metrics` | `GET` | Prometheus scrape endpoint (when exporter is `prometheus`) |
 
 Example ingestion payload:
 
@@ -163,11 +165,13 @@ Example ingestion payload:
 - Launch Streamlit UI: `uv run --group dashboard -- streamlit run dashboards/agent_dashboard.py`
 - Set `PROVENANCE_DASHBOARD_API` to point at your deployed API when running remotely.
 - To enable trend charts, set `PROVENANCE_DASHBOARD_EVENTS` to a path containing the exported JSONL events (defaults to `data/timeseries_events.jsonl`).
+- If the Prometheus exporter is enabled (`PROVENANCE_OTEL_EXPORTER=prometheus`), scrape metrics from `/metrics`.
 
 ## SDK & Schema
 
 - Generate an OpenAPI schema with `make docs` (writes `openapi.json`).
 - A lightweight synchronous client lives in `clients/python`; use `ProvenanceClient` for basic ingestion/status/analytics calls.
+- Async support is available via `AsyncProvenanceClient`. Install the client SDK with `pip install provenance[client]` and import from `clients.python`.
 
 ## Data Persistence Model
 
