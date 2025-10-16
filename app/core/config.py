@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     policy_warn_thresholds: dict[str, int] = Field(default_factory=dict)
     policy_block_thresholds: dict[str, int] = Field(default_factory=dict)
     detector_module_paths: list[str] = Field(default_factory=list)
+    github_token: str | None = None
+    github_base_url: str | None = None
+    github_agent_label_prefix: str = "agent:"
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

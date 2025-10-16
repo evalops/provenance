@@ -13,6 +13,7 @@ from app.services.analysis import AnalysisService
 from app.services.detection import DetectionService
 from app.services.governance import GovernanceService
 from app.telemetry import sink_from_settings, EventSink
+from app.provenance.github_resolver import GitHubProvenanceResolver
 
 
 @lru_cache
@@ -46,9 +47,21 @@ def get_governance_service() -> GovernanceService:
 
 
 @lru_cache
+def get_github_resolver() -> GitHubProvenanceResolver | None:
+    if not settings.github_token:
+        return None
+    return GitHubProvenanceResolver(
+        token=settings.github_token,
+        base_url=settings.github_base_url,
+        agent_label_prefix=settings.github_agent_label_prefix,
+    )
+
+
+@lru_cache
 def get_analysis_service() -> AnalysisService:
     store = get_store()
     detection = get_detection_service()
     analytics = get_analytics_service()
     governance = get_governance_service()
-    return AnalysisService(store, detection, governance, analytics)
+    github_resolver = get_github_resolver()
+    return AnalysisService(store, detection, governance, analytics, github_resolver)

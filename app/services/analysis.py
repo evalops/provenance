@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
+from typing import TYPE_CHECKING
 
 from fastapi import BackgroundTasks
 
@@ -23,6 +24,9 @@ from app.services.detection import DetectionService
 from app.services.governance import GovernanceService
 from app.telemetry import increment_analysis_ingestion, record_analysis_duration, record_analysis_findings
 
+if TYPE_CHECKING:
+    from app.provenance.github_resolver import GitHubProvenanceResolver
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -37,11 +41,13 @@ class AnalysisService:
         detection_service: DetectionService,
         governance_service: GovernanceService,
         analytics_service: AnalyticsService,
+        github_resolver: "GitHubProvenanceResolver | None" = None,
     ) -> None:
         self._store = store
         self._detection = detection_service
         self._governance = governance_service
         self._analytics = analytics_service
+        self._github_resolver = github_resolver
 
     def ingest_analysis(
         self,
@@ -108,8 +114,8 @@ class AnalysisService:
             record.error_message = str(exc)
             self._store.update_analysis(record)
 
-    @staticmethod
     def _map_changed_line(
+        self,
         analysis_id: str,
         request: AnalysisIngestionRequest,
         payload: ChangedLinePayload,
@@ -124,6 +130,16 @@ class AnalysisService:
             commit_sha=payload.attribution.commit_sha,
             provenance_marker=payload.attribution.provenance_marker,
         )
+        if not attribution.agent.agent_id:
+            agent_id, session_id = self._resolve_agent(
+                repo=request.repo,
+                pr_number=request.pr_number,
+                commit_sha=attribution.commit_sha,
+            )
+            if agent_id:
+                attribution.agent.agent_id = agent_id
+            if session_id:
+                attribution.agent_session_id = session_id
         return ChangedLine(
             analysis_id=analysis_id,
             repo_id=request.repo,
@@ -139,6 +155,17 @@ class AnalysisService:
             content=payload.content,
             attribution=attribution,
         )
+
+    def _resolve_agent(
+        self,
+        *,
+        repo: str,
+        pr_number: str,
+        commit_sha: str | None,
+    ) -> tuple[str | None, str | None]:
+        if not self._github_resolver:
+            return None, None
+        return self._github_resolver.resolve_agent(repo, pr_number, commit_sha)
 
     def list_findings(self, analysis_id: str) -> list[Finding]:
         return self._store.list_findings(analysis_id)

@@ -77,6 +77,9 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_POLICY_WARN_THRESHOLDS` | JSON map of category warn thresholds | `{}` |
 | `PROVENANCE_POLICY_BLOCK_THRESHOLDS` | JSON map of category block thresholds | `{}` |
 | `PROVENANCE_DETECTOR_MODULE_PATHS` | JSON array of detector module paths to auto-load | `[]` |
+| `PROVENANCE_GITHUB_TOKEN` | Personal access token for GitHub API enrichment | *(unset)* |
+| `PROVENANCE_GITHUB_BASE_URL` | GitHub enterprise base URL (optional) | *(unset)* |
+| `PROVENANCE_GITHUB_AGENT_LABEL_PREFIX` | PR label prefix used to infer agent IDs | `agent:` |
 
 ## Detection with Semgrep
 
@@ -91,6 +94,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - The JSON results are mapped back to the originating changed lines so findings retain repo/PR/file/line attribution.
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
+- When GitHub credentials are configured, the service automatically inspects commit trailers and PR labels to fill missing agent attribution (see `app/provenance/github_resolver.py`).
 
 ## API Surface
 
