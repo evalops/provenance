@@ -1,4 +1,4 @@
-"""Agent Code Provenance & Risk Analytics service package."""
+"""Provenance & Risk Analytics service package."""
 
 from .main import create_app
 

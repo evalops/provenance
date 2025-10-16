@@ -9,68 +9,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agent-provenance"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-dateutil" },
-    { name = "redis" },
-    { name = "semgrep" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-]
-
-[package.dev-dependencies]
-dashboard = [
-    { name = "httpx" },
-    { name = "pandas" },
-    { name = "streamlit" },
-]
-dev = [
-    { name = "fakeredis" },
-    { name = "httpx" },
-    { name = "pytest" },
-]
-warehouse = [
-    { name = "snowflake-connector-python" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.111,<1.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27,<0.28" },
-    { name = "pydantic", specifier = ">=2.7,<3.0" },
-    { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2,<9.0" },
-    { name = "python-dateutil", specifier = ">=2.9,<3.0" },
-    { name = "redis", specifier = ">=5.0,<6.0" },
-    { name = "semgrep", specifier = ">=1.64,<2.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30,<1.0" },
-]
-provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dashboard = [
-    { name = "httpx", specifier = ">=0.27,<0.28" },
-    { name = "pandas", specifier = ">=2.2,<3.0" },
-    { name = "streamlit", specifier = ">=1.36,<2.0" },
-]
-dev = [
-    { name = "fakeredis", specifier = ">=2.21,<3.0" },
-    { name = "httpx", specifier = ">=0.27,<0.28" },
-    { name = "pytest", specifier = ">=8.2,<9.0" },
-]
-warehouse = [{ name = "snowflake-connector-python", specifier = ">=3.10,<4.0" }]
-
-[[package]]
 name = "altair"
 version = "5.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1261,6 +1199,68 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/21/51/0b1cbad62074439b867b4e04cc09b93f6699d78fd191bed2bbb44562e077/protobuf-6.33.0-cp39-abi3-manylinux2014_x86_64.whl", hash = "sha256:35be49fd3f4fefa4e6e2aacc35e8b837d6703c37a2168a55ac21e9b1bc7559ef", size = 323172, upload-time = "2025-10-15T20:39:47.465Z" },
     { url = "https://files.pythonhosted.org/packages/07/d1/0a28c21707807c6aacd5dc9c3704b2aa1effbf37adebd8caeaf68b17a636/protobuf-6.33.0-py3-none-any.whl", hash = "sha256:25c9e1963c6734448ea2d308cfa610e692b801304ba0908d7bfa564ac5132995", size = 170477, upload-time = "2025-10-15T20:39:51.311Z" },
 ]
+
+[[package]]
+name = "provenance"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-dateutil" },
+    { name = "redis" },
+    { name = "semgrep" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+
+[package.dev-dependencies]
+dashboard = [
+    { name = "httpx" },
+    { name = "pandas" },
+    { name = "streamlit" },
+]
+dev = [
+    { name = "fakeredis" },
+    { name = "httpx" },
+    { name = "pytest" },
+]
+warehouse = [
+    { name = "snowflake-connector-python" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.111,<1.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27,<0.28" },
+    { name = "pydantic", specifier = ">=2.7,<3.0" },
+    { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2,<9.0" },
+    { name = "python-dateutil", specifier = ">=2.9,<3.0" },
+    { name = "redis", specifier = ">=5.0,<6.0" },
+    { name = "semgrep", specifier = ">=1.64,<2.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30,<1.0" },
+]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dashboard = [
+    { name = "httpx", specifier = ">=0.27,<0.28" },
+    { name = "pandas", specifier = ">=2.2,<3.0" },
+    { name = "streamlit", specifier = ">=1.36,<2.0" },
+]
+dev = [
+    { name = "fakeredis", specifier = ">=2.21,<3.0" },
+    { name = "httpx", specifier = ">=0.27,<0.28" },
+    { name = "pytest", specifier = ">=8.2,<9.0" },
+]
+warehouse = [{ name = "snowflake-connector-python", specifier = ">=3.10,<4.0" }]
 
 [[package]]
 name = "pyarrow"

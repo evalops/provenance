@@ -1,7 +1,7 @@
 [project]
-name = "agent-provenance"
+name = "provenance"
 version = "0.1.0"
-description = "Agent Code Provenance & Risk Analytics service"
+description = "Provenance & Risk Analytics service"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

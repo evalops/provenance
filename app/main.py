@@ -1,4 +1,4 @@
-"""Application entrypoint for the Agent Code Provenance service."""
+"""Application entrypoint for the Provenance service."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from app.routers import analysis, analytics, governance
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Agent Code Provenance & Risk Analytics",
+        title="Provenance & Risk Analytics",
         description="Tracks agent attribution, computes risk analytics, and enforces governance policies.",
         version="0.1.0",
     )
