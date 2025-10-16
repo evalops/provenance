@@ -36,13 +36,13 @@ The codebase adheres to the requirements in `Provenance & Risk Analytics service
 
 ```bash
 # 1. Install dependencies into a managed virtualenv
-uv sync
+make setup
 
 # 2. Ensure Redis is running (default: redis://localhost:6379/0)
 #    You can override via PROVENANCE_REDIS_URL
 
 # 3. Launch the API with hot reload
-uv run -- uvicorn app.main:app --reload
+make run
 ```
 
 Visit http://localhost:8000/docs for interactive OpenAPI documentation.
@@ -50,6 +50,7 @@ Visit http://localhost:8000/docs for interactive OpenAPI documentation.
 ## Configuration
 
 All settings can be driven by environment variables prefixed with `PROVENANCE_`.
+Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-style configuration.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
@@ -157,10 +158,10 @@ Example ingestion payload:
 
 ```bash
 # Static checks (Python bytecode compilation)
-uv run -- python -m compileall app
+make compile
 
 # Run the test suite (uses fakeredis for analytics tests)
-uv run -- pytest
+make test
 ```
 
 ## Next Steps / TODO
