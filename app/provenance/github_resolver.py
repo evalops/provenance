@@ -604,12 +604,23 @@ class GitHubProvenanceResolver:
             return cached[1]
 
         data = {"events": [], "summary": {"force_pushes": 0, "reopens": 0, "merge_events": 0, "review_requests": 0, "review_dismissals": 0}}
+        timeline_items: list = []
         try:
             target_pr = pr or self._get_pull(repo_full_name, pr_number)
             if not target_pr:
                 self._timeline_cache[key] = (now + self._cache_ttl, data)
                 return data
-            timeline_items = target_pr.get_timeline()
+            get_timeline = getattr(target_pr, "get_timeline", None)
+            if callable(get_timeline):
+                try:
+                    timeline_items = list(get_timeline())
+                except GithubException:
+                    timeline_items = []
+            else:
+                try:
+                    timeline_items = list(target_pr.get_issue_events())
+                except GithubException:
+                    timeline_items = []
         except GithubException:
             timeline_items = []
 
