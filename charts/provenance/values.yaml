@@ -1,0 +1,28 @@
+image:
+  repository: haasonsaas/provenance
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources: {}
+
+env:
+  PROVENANCE_REDIS_URL: redis://redis:6379/0
+  PROVENANCE_SERVICE_BASE_URL: http://provenance:8000
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+
+ingress:
+  enabled: false
+  annotations: {}
+  hosts:
+    - host: provenance.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
