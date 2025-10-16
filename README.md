@@ -59,6 +59,8 @@ All settings can be driven by environment variables prefixed with `PROVENANCE_`.
 | `PROVENANCE_RISK_HIGH_SEVERITY_THRESHOLD` | Number of high-severity findings before issuing a warn | `1` |
 | `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` | Default lookback window for analytics | `7d` |
 | `PROVENANCE_SEMGREP_CONFIG_PATH` | Override path/URL for Semgrep configuration | *(bundled rules)* |
+| `PROVENANCE_TIMESERIES_BACKEND` | Backend for analytics event export (`file`, `off`) | `file` |
+| `PROVENANCE_TIMESERIES_PATH` | File path for JSONL events when using `file` backend | `data/timeseries_events.jsonl` |
 
 ## Detection with Semgrep
 
@@ -120,6 +122,18 @@ Example ingestion payload:
 - `/v1/analytics/summary` now supports additional metrics: `code_volume`, `code_churn_rate`, and `avg_line_complexity` in addition to `risk_rate` and `provenance_coverage`.
 - `/v1/analytics/agents/behavior` returns composite snapshots (volume, churn rate, heuristic complexity, and top vulnerability categories per agent) to power comparison dashboards.
 - Use `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` or query parameters such as `?time_window=14d` to track longer horizons and compare agents.
+
+## Telemetry Export
+
+- Each analysis generates an `analysis_metrics` event written to `data/timeseries_events.jsonl` by default.
+- Point `PROVENANCE_TIMESERIES_BACKEND` to `off` to disable, or override `PROVENANCE_TIMESERIES_PATH` to ship events into a mounted volume for downstream ingestion (e.g., BigQuery/Snowflake loaders).
+- Event payloads include per-agent code volume, churn rates, complexity heuristics, and counts by finding category/severity.
+
+## Dashboard
+
+- Install dashboard dependencies: `uv sync --group dashboard`
+- Launch Streamlit UI: `uv run --group dashboard -- streamlit run dashboards/agent_dashboard.py`
+- Set `PROVENANCE_DASHBOARD_API` to point at your deployed API when running remotely.
 
 ## Data Persistence Model
 
