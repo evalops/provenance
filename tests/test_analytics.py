@@ -213,3 +213,58 @@ def test_agent_behavior_report_highlights_top_categories():
     assert copilot_snapshot.top_vulnerability_categories == {"code_execution": 2}
     assert copilot_snapshot.avg_line_complexity > 0
     assert copilot_snapshot.findings_by_severity == {"medium": 2}
+
+
+def test_mttr_and_suppression_metrics():
+    analytics = _bootstrap_store()
+    store = analytics._store  # type: ignore[attr-defined]
+    now = datetime.now(timezone.utc)
+
+    suppressed = Finding(
+        finding_id="fd-suppressed",
+        analysis_id="an-1",
+        repo_id="acme/shop",
+        pr_number="101",
+        file_path="services/orders.py",
+        line_number=99,
+        rule_key="suppression",
+        rule_version="1.0.0",
+        category="code_execution",
+        severity=SeverityLevel.MEDIUM,
+        engine_name="ext",
+        message="suppressed",
+        detected_at=now,
+        status=FindingStatus.SUPPRESSED,
+        attribution=ProvenanceAttribution(agent=AgentIdentity(agent_id="claude-3-opus")),
+    )
+    store.add_findings("an-1", [suppressed])
+
+    remediated = Finding(
+        finding_id="fd-remediated",
+        analysis_id="an-2",
+        repo_id="acme/shop",
+        pr_number="102",
+        file_path="web/forms.ts",
+        line_number=120,
+        rule_key="remediation",
+        rule_version="1.0.0",
+        category="code_execution",
+        severity=SeverityLevel.MEDIUM,
+        engine_name="ext",
+        message="remediated",
+        detected_at=now - timedelta(hours=5),
+        remediated_at=now,
+        status=FindingStatus.REMEDIATED,
+        attribution=ProvenanceAttribution(agent=AgentIdentity(agent_id="github-copilot")),
+    )
+    store.add_findings("an-2", [remediated])
+
+    mttr_series = analytics.query_series(time_window="1d", metric="mttr", group_by="agent_id")
+    suppression_series = analytics.query_series(time_window="1d", metric="suppression_rate", group_by="agent_id")
+
+    mttr_point = next(point for point in mttr_series.data if point.agent_id == "github-copilot")
+    assert mttr_point.value == pytest.approx(5.0)
+
+    suppression_point = next(point for point in suppression_series.data if point.agent_id == "claude-3-opus")
+    assert suppression_point.value == pytest.approx(50.0)
+    assert suppression_point.numerator == 1

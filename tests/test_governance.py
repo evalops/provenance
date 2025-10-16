@@ -136,3 +136,53 @@ def test_unknown_provenance_blocks_when_enabled(monkeypatch):
 
     decision = service.evaluate(record, [line], [])
     assert decision.outcome.value == "block"
+
+
+def test_category_thresholds_override(monkeypatch):
+    settings = Settings(
+        policy_warn_thresholds={"code_execution": 1},
+        policy_block_thresholds={"code_execution": 2},
+    )
+    monkeypatch.setattr("app.services.governance.settings", settings)
+    service = GovernanceService()
+    record = _baseline_record()
+    line = ChangedLine(
+        analysis_id=record.analysis_id,
+        repo_id=record.repo_id,
+        pr_number=record.pr_number,
+        head_sha=record.head_sha,
+        file_path="svc.py",
+        line_number=10,
+        change_type=ChangeType.ADDED,
+        timestamp=record.created_at,
+        branch="feature",
+        language="python",
+        content="result = sanitize(user_input)",
+        attribution=ProvenanceAttribution(agent=AgentIdentity(agent_id="claude")),
+    )
+    findings = [
+        Finding(
+            finding_id=f"fd-{idx}",
+            analysis_id=record.analysis_id,
+            repo_id=record.repo_id,
+            pr_number=record.pr_number,
+            file_path=line.file_path,
+            line_number=line.line_number,
+            rule_key="threshold",
+            rule_version="1.0.0",
+            category="code_execution",
+            severity=SeverityLevel.MEDIUM,
+            engine_name="semgrep",
+            message="",
+            detected_at=record.created_at,
+            status=FindingStatus.OPEN,
+            attribution=line.attribution,
+        )
+        for idx in range(2)
+    ]
+
+    decision = service.evaluate(record, [line], findings[:1])
+    assert decision.outcome.value == "warn"
+
+    decision_block = service.evaluate(record, [line], findings)
+    assert decision_block.outcome.value == "block"

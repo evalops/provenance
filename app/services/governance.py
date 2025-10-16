@@ -50,6 +50,21 @@ class GovernanceService:
             outcome = PolicyOutcome.WARN
             rationale = "High severity findings exceed configured threshold."
 
+        for category, count in findings_summary["findings_by_category"].items():
+            block_threshold = settings.policy_block_thresholds.get(category)
+            warn_threshold = settings.policy_warn_thresholds.get(category)
+            if block_threshold and count >= block_threshold:
+                outcome = PolicyOutcome.BLOCK
+                rationale = f"{category} findings exceeded block threshold ({count} >= {block_threshold})."
+                break
+            if (
+                warn_threshold
+                and count >= warn_threshold
+                and outcome != PolicyOutcome.BLOCK
+            ):
+                outcome = PolicyOutcome.WARN
+                rationale = f"{category} findings exceeded warn threshold ({count} >= {warn_threshold})."
+
         risk_summary = {
             "findings_total": findings_summary["total_findings"],
             "findings_by_category": findings_summary["findings_by_category"],

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     timeseries_batch_size: int = 25
     otel_enabled: bool = False
     otel_exporter: str = "console"
+    policy_warn_thresholds: dict[str, int] = Field(default_factory=dict)
+    policy_block_thresholds: dict[str, int] = Field(default_factory=dict)
+    detector_module_paths: list[str] = Field(default_factory=list)
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

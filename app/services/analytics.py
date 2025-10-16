@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
+import statistics
 from datetime import datetime, timedelta, timezone
 import re
 
 from app.models.analytics import AnalyticsSeries, MetricPoint, AgentBehaviorReport, AgentBehaviorSnapshot
-from app.models.domain import AnalysisRecord, ChangedLine, Finding, ChangeType
+from app.models.domain import AnalysisRecord, ChangedLine, Finding, ChangeType, FindingStatus
 from app.repositories.redis_store import RedisWarehouse
 from app.telemetry import EventSink, NullEventSink
 
@@ -78,6 +79,10 @@ class AnalyticsService:
             return self._compute_churn_rate(analyses, window_start, window_end, agent_id)
         if metric == "avg_line_complexity":
             return self._compute_avg_complexity(analyses, window_start, window_end, agent_id)
+        if metric == "mttr":
+            return self._compute_mttr(analyses, window_start, window_end, agent_id)
+        if metric == "suppression_rate":
+            return self._compute_suppression_rate(analyses, window_start, window_end, agent_id)
         raise ValueError(f"Unsupported metric: {metric}")
 
     def agent_behavior_report(
@@ -307,6 +312,67 @@ class AnalyticsService:
             group_by="agent_id",
             data=sorted(points, key=lambda p: p.agent_id),
         )
+
+    def _compute_mttr(
+        self,
+        analyses: list[AnalysisRecord],
+        window_start: datetime,
+        window_end: datetime,
+        agent_filter: str | None,
+    ) -> AnalyticsSeries:
+        _, findings_by_agent = self._collect_window_data(analyses, agent_filter)
+        points: list[MetricPoint] = []
+        for agent, findings in findings_by_agent.items():
+            durations = [
+                (finding.remediated_at - finding.detected_at).total_seconds()
+                for finding in findings
+                if finding.remediated_at
+            ]
+            if not durations:
+                continue
+            mttr_seconds = statistics.median(durations)
+            points.append(
+                MetricPoint(
+                    metric="mttr",
+                    agent_id=agent,
+                    value=mttr_seconds / 3600,
+                    numerator=int(mttr_seconds),
+                    denominator=len(durations),
+                    window_start=window_start,
+                    window_end=window_end,
+                    unit="hours",
+                )
+            )
+        return AnalyticsSeries(metric="mttr", group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
+
+    def _compute_suppression_rate(
+        self,
+        analyses: list[AnalysisRecord],
+        window_start: datetime,
+        window_end: datetime,
+        agent_filter: str | None,
+    ) -> AnalyticsSeries:
+        _, findings_by_agent = self._collect_window_data(analyses, agent_filter)
+        points: list[MetricPoint] = []
+        for agent, findings in findings_by_agent.items():
+            total = len(findings)
+            suppressed = sum(1 for finding in findings if finding.status == FindingStatus.SUPPRESSED)
+            if total == 0:
+                continue
+            value = (suppressed / total) * 100
+            points.append(
+                MetricPoint(
+                    metric="suppression_rate",
+                    agent_id=agent,
+                    value=value,
+                    numerator=suppressed,
+                    denominator=total,
+                    window_start=window_start,
+                    window_end=window_end,
+                    unit="percent",
+                )
+            )
+        return AnalyticsSeries(metric="suppression_rate", group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
 
     def _compute_risk_rate(
         self,

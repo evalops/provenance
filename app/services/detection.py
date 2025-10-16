@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from importlib import import_module
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,16 +34,38 @@ class DetectionService:
         detectors: Sequence["BaseDetector"] | None = None,
         semgrep_config_path: str | Path | None = None,
     ) -> None:
+        module_paths = settings.detector_module_paths
+        external_detectors = self._load_external_detectors(module_paths)
         if detectors is None:
             config_override = semgrep_config_path or settings.semgrep_config_path
             detectors = [SemgrepDetector(config_path=config_override)]
-        self._detectors = list(detectors)
+        self._detectors = list(detectors) + external_detectors
 
     def run(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         findings: list[Finding] = []
         for detector in self._detectors:
             findings.extend(detector.execute(record, lines))
         return findings
+
+    @staticmethod
+    def _load_external_detectors(module_paths: Sequence[str]) -> list["BaseDetector"]:
+        loaded: list[BaseDetector] = []
+        for path in module_paths:
+            if not path:
+                continue
+            try:
+                module = import_module(path)
+            except Exception:  # pragma: no cover - configuration issue logged upstream
+                continue
+            factory = getattr(module, "register_detectors", None) or getattr(module, "get_detectors", None)
+            if not callable(factory):
+                continue
+            detectors = factory()
+            if isinstance(detectors, BaseDetector):
+                loaded.append(detectors)
+            elif isinstance(detectors, (list, tuple)):
+                loaded.extend(det for det in detectors if isinstance(det, BaseDetector))
+        return loaded
 
 
 class BaseDetector:

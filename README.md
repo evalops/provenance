@@ -74,6 +74,9 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_TIMESERIES_BATCH_SIZE` | Buffer size before flushing warehouse writes | `25` |
 | `PROVENANCE_OTEL_ENABLED` | Enable OpenTelemetry metrics export | `false` |
 | `PROVENANCE_OTEL_EXPORTER` | Metrics exporter target (`console`) | `console` |
+| `PROVENANCE_POLICY_WARN_THRESHOLDS` | JSON map of category warn thresholds | `{}` |
+| `PROVENANCE_POLICY_BLOCK_THRESHOLDS` | JSON map of category block thresholds | `{}` |
+| `PROVENANCE_DETECTOR_MODULE_PATHS` | JSON array of detector module paths to auto-load | `[]` |
 
 ## Detection with Semgrep
 
@@ -87,6 +90,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 
 - The JSON results are mapped back to the originating changed lines so findings retain repo/PR/file/line attribution.
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
+- Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
 
 ## API Surface
 
