@@ -1455,7 +1455,9 @@ client = [
     { name = "httpx" },
 ]
 dev = [
+    { name = "fakeredis" },
     { name = "httpx" },
+    { name = "hypothesis" },
     { name = "pytest" },
 ]
 
@@ -1481,9 +1483,11 @@ warehouse = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fakeredis", marker = "extra == 'dev'", specifier = ">=2.21,<3.0" },
     { name = "fastapi", specifier = ">=0.111,<1.0" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.27,<0.28" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27,<0.28" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.98,<7.0" },
     { name = "opentelemetry-api", specifier = ">=1.25,<2.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.25,<2.0" },
     { name = "pydantic", specifier = ">=2.7,<3.0" },
