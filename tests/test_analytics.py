@@ -33,7 +33,14 @@ def _bootstrap_store() -> AnalyticsService:
         head_sha="def",
         created_at=now,
         updated_at=now,
-        provenance_inputs={},
+        provenance_inputs={
+            "github_review_stats": {
+                "review_comment_count": 2,
+                "unique_reviewers": 1,
+                "review_events": 1,
+                "agent_comment_mentions": 1,
+            }
+        },
     )
     store.create_analysis(record1)
     claude = AgentIdentity(agent_id="claude-3-opus")
@@ -91,7 +98,14 @@ def _bootstrap_store() -> AnalyticsService:
         head_sha="jkl",
         created_at=record2_time,
         updated_at=record2_time,
-        provenance_inputs={},
+        provenance_inputs={
+            "github_review_stats": {
+                "review_comment_count": 3,
+                "unique_reviewers": 2,
+                "review_events": 2,
+                "agent_comment_mentions": 0,
+            }
+        },
     )
     store.create_analysis(record2)
     copilot = AgentIdentity(agent_id="github-copilot")
@@ -208,11 +222,19 @@ def test_agent_behavior_report_highlights_top_categories():
     assert claude_snapshot.top_vulnerability_categories == {"sqli": 1}
     assert claude_snapshot.max_line_complexity > 0
     assert claude_snapshot.findings_by_severity == {"high": 1}
+    assert claude_snapshot.review_comment_count == 2
+    assert claude_snapshot.unique_reviewers == 1
+    assert claude_snapshot.review_events == 1
+    assert claude_snapshot.agent_comment_mentions == 1
 
     copilot_snapshot = next(s for s in report.snapshots if s.agent_id == "github-copilot")
     assert copilot_snapshot.top_vulnerability_categories == {"code_execution": 2}
     assert copilot_snapshot.avg_line_complexity > 0
     assert copilot_snapshot.findings_by_severity == {"medium": 2}
+    assert copilot_snapshot.review_comment_count == 3
+    assert copilot_snapshot.unique_reviewers == 2
+    assert copilot_snapshot.review_events == 2
+    assert copilot_snapshot.agent_comment_mentions == 0
 
 
 def test_mttr_and_suppression_metrics():
@@ -261,6 +283,8 @@ def test_mttr_and_suppression_metrics():
 
     mttr_series = analytics.query_series(time_window="1d", metric="mttr", group_by="agent_id")
     suppression_series = analytics.query_series(time_window="1d", metric="suppression_rate", group_by="agent_id")
+    review_series = analytics.query_series(time_window="1d", metric="review_comments", group_by="agent_id")
+    reviewer_series = analytics.query_series(time_window="1d", metric="unique_reviewers", group_by="agent_id")
 
     mttr_point = next(point for point in mttr_series.data if point.agent_id == "github-copilot")
     assert mttr_point.value == pytest.approx(5.0)
@@ -268,3 +292,9 @@ def test_mttr_and_suppression_metrics():
     suppression_point = next(point for point in suppression_series.data if point.agent_id == "claude-3-opus")
     assert suppression_point.value == pytest.approx(50.0)
     assert suppression_point.numerator == 1
+
+    review_point = next(point for point in review_series.data if point.agent_id == "github-copilot")
+    assert review_point.value == 3.0
+
+    reviewer_point = next(point for point in reviewer_series.data if point.agent_id == "github-copilot")
+    assert reviewer_point.value == 2.0

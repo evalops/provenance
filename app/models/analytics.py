@@ -50,6 +50,10 @@ class AgentBehaviorSnapshot(BaseModel):
     findings_by_severity: dict[str, int] = Field(
         default_factory=dict, description="Finding counts bucketed by severity."
     )
+    review_comment_count: int = Field(0, description="Total PR review comments in the window.")
+    unique_reviewers: int = Field(0, description="Unique reviewer count across associated PRs.")
+    review_events: int = Field(0, description="Total review submissions across associated PRs.")
+    agent_comment_mentions: int = Field(0, description="Count of agent markers found in review comments.")
 
 
 class AgentBehaviorReport(BaseModel):

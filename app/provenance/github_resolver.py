@@ -35,6 +35,7 @@ class GitHubProvenanceResolver:
         self._label_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         self._comment_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         self._reviewer_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
+        self._review_event_cache: dict[tuple[str, int], tuple[float, int]] = {}
 
     def resolve_agent(
         self,
@@ -52,6 +53,20 @@ class GitHubProvenanceResolver:
         if not agent_id and pr_number:
             agent_id = self._from_pr_discussion(repo_full_name, int(pr_number))
         return agent_id, session_id
+
+    def review_stats(self, repo_full_name: str, pr_number: int) -> dict[str, int] | None:
+        comments = self._fetch_pr_comments(repo_full_name, pr_number)
+        reviewers = self._fetch_review_authors(repo_full_name, pr_number)
+        review_events = self._fetch_review_events(repo_full_name, pr_number)
+        if not comments and not reviewers and not review_events:
+            return None
+        agent_mentions = sum(1 for body in comments for line in body.splitlines() if AGENT_TRAILER_PATTERN.match(line.strip()))
+        return {
+            "review_comment_count": len(comments),
+            "unique_reviewers": len(set(reviewers)),
+            "review_events": review_events,
+            "agent_comment_mentions": agent_mentions,
+        }
 
     def _fetch_commit(self, repo_full_name: str, sha: str) -> Optional[Commit.Commit]:
         key = (repo_full_name, sha)
@@ -137,6 +152,21 @@ class GitHubProvenanceResolver:
             authors = []
         self._reviewer_cache[key] = (now + self._cache_ttl, authors)
         return authors
+
+    def _fetch_review_events(self, repo_full_name: str, pr_number: int) -> int:
+        key = (repo_full_name, pr_number)
+        cached = self._review_event_cache.get(key)
+        now = time.monotonic()
+        if cached and cached[0] > now:
+            return cached[1]
+        try:
+            repo = self._client.get_repo(repo_full_name)
+            pr = repo.get_pull(pr_number)
+            events = pr.get_reviews().totalCount
+        except GithubException:
+            events = 0
+        self._review_event_cache[key] = (now + self._cache_ttl, events)
+        return events
 
     def _from_pr_discussion(self, repo_full_name: str, pr_number: int) -> Optional[str]:
         for body in self._fetch_pr_comments(repo_full_name, pr_number):

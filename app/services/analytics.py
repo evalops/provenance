@@ -83,6 +83,10 @@ class AnalyticsService:
             return self._compute_mttr(analyses, window_start, window_end, agent_id)
         if metric == "suppression_rate":
             return self._compute_suppression_rate(analyses, window_start, window_end, agent_id)
+        if metric == "review_comments":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="review_comment_count", unit="count")
+        if metric == "unique_reviewers":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="unique_reviewers", unit="count")
         raise ValueError(f"Unsupported metric: {metric}")
 
     def agent_behavior_report(
@@ -96,7 +100,7 @@ class AnalyticsService:
         window_start = window_end - window
         analyses = self._filter_analyses(window_start)
         snapshots: list[AgentBehaviorSnapshot] = []
-        lines_by_agent, findings_by_agent = self._collect_window_data(analyses, agent_id)
+        lines_by_agent, findings_by_agent, review_stats_by_agent = self._collect_window_data(analyses, agent_id)
         for agent, lines in lines_by_agent.items():
             code_volume = len(lines)
             churn_lines = sum(1 for line in lines if line.change_type in {ChangeType.MODIFIED, ChangeType.DELETED})
@@ -110,6 +114,11 @@ class AnalyticsService:
                 category_counts[finding.category] += 1
                 severity_counts[finding.severity.value] += 1
             top_categories_map = dict(sorted(category_counts.items(), key=lambda item: item[1], reverse=True)[:top_categories])
+            review_stats = review_stats_by_agent.get(agent, [])
+            review_comment_count = sum(stat.get("review_comment_count", 0) for stat in review_stats)
+            unique_reviewers = sum(stat.get("unique_reviewers", 0) for stat in review_stats)
+            review_events = sum(stat.get("review_events", 0) for stat in review_stats)
+            agent_mentions = sum(stat.get("agent_comment_mentions", 0) for stat in review_stats)
             snapshots.append(
                 AgentBehaviorSnapshot(
                     agent_id=agent,
@@ -120,6 +129,10 @@ class AnalyticsService:
                     max_line_complexity=max_complexity,
                     top_vulnerability_categories=top_categories_map,
                     findings_by_severity=dict(severity_counts),
+                    review_comment_count=review_comment_count,
+                    unique_reviewers=unique_reviewers,
+                    review_events=review_events,
+                    agent_comment_mentions=agent_mentions,
                 )
             )
         snapshots.sort(key=lambda snap: snap.agent_id)
@@ -191,9 +204,10 @@ class AnalyticsService:
 
     def _collect_window_data(
         self, analyses: list[AnalysisRecord], agent_filter: str | None
-    ) -> tuple[dict[str, list[ChangedLine]], dict[str, list[Finding]]]:
+    ) -> tuple[dict[str, list[ChangedLine]], dict[str, list[Finding]], dict[str, list[dict]]]:
         lines_by_agent: dict[str, list[ChangedLine]] = defaultdict(list)
         findings_by_agent: dict[str, list[Finding]] = defaultdict(list)
+        review_stats_by_agent: dict[str, list[dict]] = defaultdict(list)
         for analysis in analyses:
             lines = self._store.get_changed_lines(analysis.analysis_id)
             findings = self._store.list_findings(analysis.analysis_id)
@@ -207,7 +221,19 @@ class AnalyticsService:
                 if agent_filter and agent_id != agent_filter:
                     continue
                 findings_by_agent[agent_id].append(finding)
-        return lines_by_agent, findings_by_agent
+            review_stats = analysis.provenance_inputs.get("github_review_stats")
+            if review_stats:
+                agents_in_analysis = set()
+                for line in lines:
+                    agent_id = line.attribution.agent.agent_id or "unknown"
+                    if agent_filter and agent_id != agent_filter:
+                        continue
+                    agents_in_analysis.add(agent_id)
+                if not agents_in_analysis and not agent_filter:
+                    agents_in_analysis = {"unknown"}
+                for agent in agents_in_analysis:
+                    review_stats_by_agent[agent].append(review_stats)
+        return lines_by_agent, findings_by_agent, review_stats_by_agent
 
     @staticmethod
     def _line_complexity(line: ChangedLine) -> int:
@@ -236,7 +262,7 @@ class AnalyticsService:
         window_end: datetime,
         agent_filter: str | None,
     ) -> AnalyticsSeries:
-        lines_by_agent, _ = self._collect_window_data(analyses, agent_filter)
+        lines_by_agent, _, _ = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
         for agent, lines in lines_by_agent.items():
             total_lines = len(lines)
@@ -261,7 +287,7 @@ class AnalyticsService:
         window_end: datetime,
         agent_filter: str | None,
     ) -> AnalyticsSeries:
-        lines_by_agent, _ = self._collect_window_data(analyses, agent_filter)
+        lines_by_agent, _, _ = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
         for agent, lines in lines_by_agent.items():
             total_lines = len(lines)
@@ -288,7 +314,7 @@ class AnalyticsService:
         window_end: datetime,
         agent_filter: str | None,
     ) -> AnalyticsSeries:
-        lines_by_agent, _ = self._collect_window_data(analyses, agent_filter)
+        lines_by_agent, _, _ = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
         for agent, lines in lines_by_agent.items():
             complexity_values = [self._line_complexity(line) for line in lines if (line.content or "").strip()]
@@ -320,7 +346,7 @@ class AnalyticsService:
         window_end: datetime,
         agent_filter: str | None,
     ) -> AnalyticsSeries:
-        _, findings_by_agent = self._collect_window_data(analyses, agent_filter)
+        _, findings_by_agent, review_stats_by_agent = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
         for agent, findings in findings_by_agent.items():
             durations = [
@@ -352,7 +378,7 @@ class AnalyticsService:
         window_end: datetime,
         agent_filter: str | None,
     ) -> AnalyticsSeries:
-        _, findings_by_agent = self._collect_window_data(analyses, agent_filter)
+        _, findings_by_agent, review_stats_by_agent = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
         for agent, findings in findings_by_agent.items():
             total = len(findings)
@@ -373,6 +399,34 @@ class AnalyticsService:
                 )
             )
         return AnalyticsSeries(metric="suppression_rate", group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
+
+    def _compute_review_metric(
+        self,
+        analyses: list[AnalysisRecord],
+        window_start: datetime,
+        window_end: datetime,
+        agent_filter: str | None,
+        *,
+        key: str,
+        unit: str,
+    ) -> AnalyticsSeries:
+        _, _, review_stats_by_agent = self._collect_window_data(analyses, agent_filter)
+        points: list[MetricPoint] = []
+        for agent, stats in review_stats_by_agent.items():
+            total = sum(entry.get(key, 0) for entry in stats)
+            points.append(
+                MetricPoint(
+                    metric=key,
+                    agent_id=agent,
+                    value=float(total),
+                    numerator=int(total),
+                    denominator=max(len(stats), 1),
+                    window_start=window_start,
+                    window_end=window_end,
+                    unit=unit,
+                )
+            )
+        return AnalyticsSeries(metric=key, group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
 
     def _compute_risk_rate(
         self,

@@ -50,3 +50,15 @@ def test_resolver_uses_pr_comments(monkeypatch):
     )
     agent, _ = resolver.resolve_agent("acme/repo", "77", None)
     assert agent == "gemma-7b"
+
+
+def test_review_stats(monkeypatch):
+    resolver = GitHubProvenanceResolver(token="token")
+    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_pr_comments", lambda self, repo, pr: ["Agent-ID: claude", "ok"])
+    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_review_authors", lambda self, repo, pr: ["reviewer-a", "reviewer-b"])
+    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_review_events", lambda self, repo, pr: 3)
+    stats = resolver.review_stats("acme/repo", 99)
+    assert stats["review_comment_count"] == 2
+    assert stats["unique_reviewers"] == 2
+    assert stats["review_events"] == 3
+    assert stats["agent_comment_mentions"] == 1

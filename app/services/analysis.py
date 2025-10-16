@@ -56,6 +56,16 @@ class AnalysisService:
     ) -> AnalysisRecord:
         analysis_id = new_analysis_id()
         timestamp = _now()
+        provenance_inputs = request.provenance_data.model_dump()
+
+        if self._github_resolver and request.pr_number:
+            github_stats = self._github_resolver.review_stats(
+                repo_full_name=request.repo,
+                pr_number=int(request.pr_number),
+            )
+            if github_stats:
+                provenance_inputs["github_review_stats"] = github_stats
+
         record = AnalysisRecord(
             analysis_id=analysis_id,
             status=AnalysisStatus.RECEIVED,
@@ -65,7 +75,7 @@ class AnalysisService:
             head_sha=request.head_sha,
             created_at=timestamp,
             updated_at=timestamp,
-            provenance_inputs=request.provenance_data.model_dump(),
+            provenance_inputs=provenance_inputs,
         )
         self._store.create_analysis(record)
         lines = [
