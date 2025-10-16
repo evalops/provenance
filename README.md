@@ -138,6 +138,7 @@ Example ingestion payload:
 - Install dashboard dependencies: `uv sync --group dashboard`
 - Launch Streamlit UI: `uv run --group dashboard -- streamlit run dashboards/agent_dashboard.py`
 - Set `PROVENANCE_DASHBOARD_API` to point at your deployed API when running remotely.
+- To enable trend charts, set `PROVENANCE_DASHBOARD_EVENTS` to a path containing the exported JSONL events (defaults to `data/timeseries_events.jsonl`).
 
 ## Data Persistence Model
 

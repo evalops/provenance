@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import httpx
 import pandas as pd
@@ -11,6 +12,7 @@ import streamlit as st
 
 
 API_BASE_URL = os.getenv("PROVENANCE_DASHBOARD_API", "http://localhost:8000/v1")
+EVENTS_PATH = os.getenv("PROVENANCE_DASHBOARD_EVENTS", "data/timeseries_events.jsonl")
 
 
 @st.cache_data(show_spinner=False)
@@ -40,10 +42,33 @@ def fetch_behavior(time_window: str) -> pd.DataFrame:
     return frame
 
 
+@st.cache_data(show_spinner=False)
+def load_timeseries_events(days: int) -> pd.DataFrame:
+    path = Path(EVENTS_PATH)
+    if not path.exists():
+        return pd.DataFrame()
+    frame = pd.read_json(path, lines=True)
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=days)
+    frame = frame[frame["timestamp"] >= cutoff]
+    return frame.explode("agent_metrics").reset_index(drop=True)
+
+
+def prepare_trends(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    metrics = pd.json_normalize(frame["agent_metrics"])
+    combined = pd.concat([frame[["timestamp"]].reset_index(drop=True), metrics], axis=1)
+    combined["timestamp"] = pd.to_datetime(combined["timestamp"])
+    combined.sort_values("timestamp", inplace=True)
+    return combined
+
+
 def main() -> None:
     st.set_page_config(page_title="Agent Provenance Analytics", layout="wide")
     st.title("Agent Provenance & Risk Dashboard")
     time_window = st.sidebar.selectbox("Time window", ["1d", "3d", "7d", "14d", "30d"], index=2)
+    trend_days = st.sidebar.slider("Trend lookback (days)", min_value=1, max_value=60, value=14)
 
     col1, col2, col3 = st.columns(3)
 
@@ -92,6 +117,16 @@ def main() -> None:
         st.caption(
             f"Window {behavior_df['window_start'].iloc[0]} → {behavior_df['window_end'].iloc[0]} | Updated {datetime.utcnow().isoformat()}"
         )
+
+    st.subheader("Trend analysis (timeseries events)")
+    events_df = load_timeseries_events(trend_days)
+    trend_df = prepare_trends(events_df)
+    if trend_df.empty:
+        st.info("Timeseries event log not available or empty. Configure PROVENANCE_DASHBOARD_EVENTS to enable trends.")
+    else:
+        for metric in ["code_volume", "churn_rate", "avg_line_complexity", "max_line_complexity"]:
+            chart_df = trend_df.pivot(index="timestamp", columns="agent_id", values=metric)
+            st.line_chart(chart_df, height=240)
 
 
 if __name__ == "__main__":
