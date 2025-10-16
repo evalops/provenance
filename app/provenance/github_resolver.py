@@ -2,15 +2,47 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import statistics
+import math
+from collections import defaultdict
+from datetime import datetime, timezone
 import re
 import time
-from typing import Optional
+from typing import Optional, Callable, Iterable, Sequence
 
 from github import Github, GithubException, Commit
 from github.Auth import Token
 
 AGENT_TRAILER_PATTERN = re.compile(r"^Agent-ID:\s*(?P<agent>[^\s]+)", re.IGNORECASE)
 CO_AUTHOR_PATTERN = re.compile(r"Co-authored-by:\s*(?P<author>.+)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ThreadEvent:
+    author: str | None
+    created_at: datetime | None
+    is_agent: bool
+
+
+@dataclass
+class ConversationComments:
+    serialized: list[dict]
+    thread_events: dict[str, list[ThreadEvent]]
+    classification_counts: dict[str, int]
+    unique_reviewers: set[str]
+    agent_mentions: int
+
+
+@dataclass
+class ConversationReviews:
+    entries: list[dict]
+    classification_counts: dict[str, int]
+    unique_reviewers: set[str]
+    approvals: int
+    requested_changes: int
+    first_review_time: datetime | None
+    first_approval_time: datetime | None
 
 
 class GitHubProvenanceResolver:
@@ -38,6 +70,9 @@ class GitHubProvenanceResolver:
         self._comment_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         self._reviewer_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         self._review_event_cache: dict[tuple[str, int], tuple[float, int]] = {}
+        self._pull_cache: dict[tuple[str, int], tuple[float, Optional[object]]] = {}
+        self._checks_cache: dict[str, tuple[float, dict]] = {}
+        self._timeline_cache: dict[tuple[str, int], tuple[float, dict]] = {}
 
     def resolve_agent(
         self,
@@ -47,42 +82,84 @@ class GitHubProvenanceResolver:
     ) -> tuple[Optional[str], Optional[str], dict]:
         agent_id: Optional[str] = None
         session_id: Optional[str] = None
-        evidence: dict = {}
+        evidence: dict = {"sources": []}
 
         if commit_sha:
-            agent_id, session_id, commit_evidence = self._from_commit(repo_full_name, commit_sha)
-            evidence.setdefault("sources", []).append(commit_evidence)
-        if not agent_id and pr_number:
+            commit_agent, commit_session, commit_evidence = self._from_commit(repo_full_name, commit_sha)
+        else:
+            commit_agent, commit_session, commit_evidence = (None, None, {"source": "commit", "reason": "not_provided"})
+        evidence["sources"].append(commit_evidence)
+        if commit_agent:
+            agent_id = commit_agent
+        if commit_session:
+            session_id = commit_session
+
+        label_evidence = {"source": "label", "reason": "not_checked"}
+        if pr_number:
             label_agent, label_evidence = self._from_pr_labels(repo_full_name, int(pr_number))
-            if label_agent:
+            if label_agent and not agent_id:
                 agent_id = label_agent
-            evidence.setdefault("sources", []).append(label_evidence)
-        if not agent_id and pr_number:
+        evidence["sources"].append(label_evidence)
+
+        discussion_evidence = {"source": "discussion", "reason": "not_checked"}
+        if pr_number:
             discussion_agent, discussion_evidence = self._from_pr_discussion(repo_full_name, int(pr_number))
-            if discussion_agent:
+            if discussion_agent and not agent_id:
                 agent_id = discussion_agent
-            evidence.setdefault("sources", []).append(discussion_evidence)
-        if not agent_id and pr_number:
+        evidence["sources"].append(discussion_evidence)
+
+        body_evidence = {"source": "body", "reason": "not_checked"}
+        if pr_number:
             body_agent, body_evidence = self._from_pr_body(repo_full_name, int(pr_number))
-            if body_agent:
+            if body_agent and not agent_id:
                 agent_id = body_agent
-            evidence.setdefault("sources", []).append(body_evidence)
+        evidence["sources"].append(body_evidence)
+
         evidence["agent_id"] = agent_id
         return agent_id, session_id, evidence
 
     def review_stats(self, repo_full_name: str, pr_number: int) -> dict[str, int] | None:
-        comments = self._fetch_pr_comments(repo_full_name, pr_number)
-        reviewers = self._fetch_review_authors(repo_full_name, pr_number)
-        review_events = self._fetch_review_events(repo_full_name, pr_number)
-        if not comments and not reviewers and not review_events:
+        pr = self._get_pull(repo_full_name, pr_number)
+        if not pr:
             return None
-        agent_mentions = sum(1 for body in comments for line in body.splitlines() if AGENT_TRAILER_PATTERN.match(line.strip()))
-        return {
-            "review_comment_count": len(comments),
-            "unique_reviewers": len(set(reviewers)),
-            "review_events": review_events,
-            "agent_comment_mentions": agent_mentions,
+        conversation = self._build_conversation_snapshot(pr, set(self._agent_map.keys()))
+        summary = conversation.get("summary", {})
+        return summary or None
+
+    def collect_pr_metadata(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        head_sha: str | None,
+    ) -> dict:
+        pr = self._get_pull(repo_full_name, pr_number)
+        if not pr:
+            return {}
+
+        created_at = getattr(pr, "created_at", None)
+        merged_at = getattr(pr, "merged_at", None)
+        updated_at = getattr(pr, "updated_at", None)
+        agent_logins = set(self._agent_map.keys())
+
+        conversation = self._build_conversation_snapshot(pr, agent_logins)
+        timeline = self._collect_timeline(repo_full_name, pr_number, pr)
+        commit_summary = self._summarize_commits(pr, agent_logins, timeline.get("summary", {}))
+        ci_summary = self._collect_ci(repo_full_name, head_sha) if head_sha else {}
+
+        metadata: dict = {
+            "review_summary": conversation.get("summary", {}),
+            "conversation": conversation,
+            "reviews": conversation.get("reviews", []),
+            "comments": conversation.get("comments", []),
+            "timeline_summary": timeline.get("summary", {}),
+            "timeline_events": timeline.get("events", []),
+            "commit_summary": commit_summary,
+            "ci_summary": ci_summary,
+            "created_at": self._coerce_iso(created_at),
+            "merged_at": self._coerce_iso(merged_at),
+            "updated_at": self._coerce_iso(updated_at),
         }
+        return metadata
 
     def _fetch_commit(self, repo_full_name: str, sha: str) -> Optional[Commit.Commit]:
         key = (repo_full_name, sha)
@@ -188,6 +265,567 @@ class GitHubProvenanceResolver:
             events = 0
         self._review_event_cache[key] = (now + self._cache_ttl, events)
         return events
+
+    def _get_pull(self, repo_full_name: str, pr_number: int):
+        key = (repo_full_name, pr_number)
+        cached = self._pull_cache.get(key)
+        now = time.monotonic()
+        if cached and cached[0] > now:
+            return cached[1]
+        try:
+            repo = self._client.get_repo(repo_full_name)
+            pull = repo.get_pull(pr_number)
+        except GithubException:
+            pull = None
+        self._pull_cache[key] = (now + self._cache_ttl, pull)
+        return pull
+
+    def _collect_ci(self, repo_full_name: str, sha: str) -> dict:
+        key = sha
+        cached = self._checks_cache.get(key)
+        now = time.monotonic()
+        if cached and cached[0] > now:
+            return cached[1]
+        summary = {
+            "run_count": 0,
+            "failure_count": 0,
+            "latest_status": None,
+            "time_to_green_hours": None,
+            "failed_checks": [],
+            "last_failure_at": None,
+            "last_success_at": None,
+        }
+        try:
+            repo = self._client.get_repo(repo_full_name)
+            commit = repo.get_commit(sha)
+            combined_status = commit.get_combined_status()
+            summary["latest_status"] = combined_status.state
+            failure_count = 0
+            earliest_failure_at = None
+            latest_success_at = None
+            failed_checks: set[str] = set()
+            statuses = list(combined_status.statuses)
+            summary["run_count"] = len(statuses)
+            for status in statuses:
+                updated_at = getattr(status, "updated_at", None)
+                if status.state != "success":
+                    failure_count += 1
+                    if updated_at and (earliest_failure_at is None or updated_at < earliest_failure_at):
+                        earliest_failure_at = updated_at
+                    if getattr(status, "context", None):
+                        failed_checks.add(status.context)
+                else:
+                    if updated_at and (latest_success_at is None or updated_at > latest_success_at):
+                        latest_success_at = updated_at
+            try:
+                check_runs = commit.get_check_runs()
+                check_items = list(check_runs)
+            except GithubException:
+                check_items = []
+            summary["run_count"] += len(check_items)
+            for run in check_items:
+                concluded = getattr(run, "conclusion", None)
+                completed_at = getattr(run, "completed_at", None) or getattr(run, "started_at", None)
+                if concluded not in ("success", "neutral"):
+                    failure_count += 1
+                    if completed_at and (earliest_failure_at is None or completed_at < earliest_failure_at):
+                        earliest_failure_at = completed_at
+                    if getattr(run, "name", None):
+                        failed_checks.add(run.name)
+                elif concluded == "success":
+                    if completed_at and (latest_success_at is None or completed_at > latest_success_at):
+                        latest_success_at = completed_at
+            summary["failure_count"] = failure_count
+            summary["failed_checks"] = sorted(check for check in failed_checks if check)
+            summary["last_failure_at"] = self._coerce_iso(earliest_failure_at)
+            summary["last_success_at"] = self._coerce_iso(latest_success_at)
+            if earliest_failure_at and latest_success_at:
+                summary["time_to_green_hours"] = self._hours_between(earliest_failure_at, latest_success_at)
+        except GithubException:
+            pass
+        self._checks_cache[key] = (now + self._cache_ttl, summary)
+        return summary
+
+    def _build_conversation_snapshot(self, pr, agent_logins: set[str]) -> dict:
+        issue_comments = self._safe_paginated(pr.get_issue_comments)
+        review_comments = self._safe_paginated(pr.get_review_comments)
+        reviews = self._safe_paginated(pr.get_reviews)
+
+        comments_info = self._summarize_comments(issue_comments, review_comments, agent_logins)
+        reviews_info = self._summarize_reviews(reviews, agent_logins)
+        threads_summary, thread_metrics = self._summarize_threads(comments_info.thread_events)
+
+        classification_counts = self._merge_counts(
+            comments_info.classification_counts, reviews_info.classification_counts
+        )
+        unique_reviewers = comments_info.unique_reviewers | reviews_info.unique_reviewers
+
+        created_at = getattr(pr, "created_at", None)
+        merged_at = getattr(pr, "merged_at", None)
+
+        summary = {
+            "review_comment_count": len(comments_info.serialized),
+            "unique_reviewers": len(unique_reviewers),
+            "review_events": len(reviews_info.entries),
+            "agent_comment_mentions": comments_info.agent_mentions,
+            "approvals": reviews_info.approvals,
+            "requested_changes": reviews_info.requested_changes,
+            "comment_threads": thread_metrics["thread_count"],
+            "reopened_threads": thread_metrics["reopened_threads"],
+            "classification_breakdown": dict(sorted(classification_counts.items(), key=lambda item: item[1], reverse=True)),
+            "agent_response_rate": thread_metrics["response_rate"],
+        }
+
+        if thread_metrics["response_latencies"]:
+            summary["agent_response_p50_hours"] = statistics.median(thread_metrics["response_latencies"])
+            summary["agent_response_p90_hours"] = self._percentile(thread_metrics["response_latencies"], 90)
+
+        if created_at and reviews_info.first_review_time:
+            summary["time_to_first_review_hours"] = self._hours_between(created_at, reviews_info.first_review_time)
+        if created_at and reviews_info.first_approval_time:
+            summary["time_to_first_approval_hours"] = self._hours_between(created_at, reviews_info.first_approval_time)
+        if created_at and merged_at:
+            summary["time_to_merge_hours"] = self._hours_between(created_at, merged_at)
+
+        return {
+            "comments": comments_info.serialized,
+            "reviews": reviews_info.entries,
+            "threads": threads_summary,
+            "classifications": dict(sorted(classification_counts.items(), key=lambda item: item[1], reverse=True)),
+            "summary": summary,
+        }
+
+    def _summarize_comments(
+        self,
+        issue_comments: Sequence,
+        review_comments: Sequence,
+        agent_logins: set[str],
+    ) -> ConversationComments:
+        serialized: list[dict] = []
+        thread_events: dict[str, list[ThreadEvent]] = defaultdict(list)
+        classification_counts: dict[str, int] = defaultdict(int)
+        unique_reviewers: set[str] = set()
+        agent_mentions = 0
+
+        for comment in issue_comments:
+            entry, thread_key, event, classification = self._serialize_comment(
+                comment, "issue_comment", agent_logins, len(serialized)
+            )
+            serialized.append(entry)
+            thread_events[thread_key].append(event)
+            classification_counts[classification] += 1
+            if event.author and not event.is_agent:
+                unique_reviewers.add(event.author)
+            if AGENT_TRAILER_PATTERN.search(entry["body"]):
+                agent_mentions += 1
+
+        for comment in review_comments:
+            entry, thread_key, event, classification = self._serialize_comment(
+                comment, "review_comment", agent_logins, len(serialized)
+            )
+            serialized.append(entry)
+            thread_events[thread_key].append(event)
+            classification_counts[classification] += 1
+            if event.author and not event.is_agent:
+                unique_reviewers.add(event.author)
+            if AGENT_TRAILER_PATTERN.search(entry["body"]):
+                agent_mentions += 1
+
+        normalized_threads = {key: events[:] for key, events in thread_events.items()}
+        return ConversationComments(
+            serialized=serialized,
+            thread_events=normalized_threads,
+            classification_counts=dict(classification_counts),
+            unique_reviewers=unique_reviewers,
+            agent_mentions=agent_mentions,
+        )
+
+    def _summarize_reviews(
+        self,
+        reviews: Sequence,
+        agent_logins: set[str],
+    ) -> ConversationReviews:
+        entries: list[dict] = []
+        classification_counts: dict[str, int] = defaultdict(int)
+        unique_reviewers: set[str] = set()
+        approvals = 0
+        requested_changes = 0
+        first_review_time: datetime | None = None
+        first_approval_time: datetime | None = None
+
+        for review in reviews:
+            submitted_at = getattr(review, "submitted_at", None)
+            author_login = getattr(getattr(review, "user", None), "login", None)
+            classification = self._classify_review(review.state, review.body or "")
+            entries.append(
+                {
+                    "author": author_login,
+                    "state": review.state,
+                    "submitted_at": self._coerce_iso(submitted_at),
+                    "body": review.body or "",
+                    "classification": classification,
+                }
+            )
+            classification_counts[classification] += 1
+            if author_login and not self._is_agent_login(author_login, agent_logins):
+                unique_reviewers.add(author_login)
+            if submitted_at and (first_review_time is None or submitted_at < first_review_time):
+                first_review_time = submitted_at
+            if review.state == "APPROVED":
+                approvals += 1
+                if submitted_at and (first_approval_time is None or submitted_at < first_approval_time):
+                    first_approval_time = submitted_at
+            if review.state == "CHANGES_REQUESTED":
+                requested_changes += 1
+
+        return ConversationReviews(
+            entries=entries,
+            classification_counts=dict(classification_counts),
+            unique_reviewers=unique_reviewers,
+            approvals=approvals,
+            requested_changes=requested_changes,
+            first_review_time=first_review_time,
+            first_approval_time=first_approval_time,
+        )
+
+    def _summarize_threads(
+        self,
+        thread_events: dict[str, list[ThreadEvent]],
+    ) -> tuple[list[dict], dict]:
+        threads_summary: list[dict] = []
+        response_latencies: list[float] = []
+        responded_threads = 0
+        reopened_threads = 0
+
+        for thread_id, events in thread_events.items():
+            sorted_events = self._sort_events(events)
+            participants = sorted({event.author for event in sorted_events if event.author})
+            first_reviewer_event = next((event for event in sorted_events if not event.is_agent), None)
+            agent_response_hours = None
+            first_agent_event: ThreadEvent | None = None
+            if first_reviewer_event and first_reviewer_event.created_at:
+                for event in sorted_events:
+                    if not event.is_agent or not event.created_at:
+                        continue
+                    if event.created_at >= first_reviewer_event.created_at:
+                        agent_response_hours = self._hours_between(first_reviewer_event.created_at, event.created_at)
+                        if agent_response_hours is not None:
+                            response_latencies.append(agent_response_hours)
+                            responded_threads += 1
+                            first_agent_event = event
+                        break
+            reopened = False
+            if first_agent_event and first_agent_event.created_at:
+                for event in sorted_events:
+                    if event is first_agent_event or event.is_agent or not event.created_at:
+                        continue
+                    if event.created_at > first_agent_event.created_at:
+                        reopened = True
+                        reopened_threads += 1
+                        break
+            threads_summary.append(
+                {
+                    "thread_id": thread_id,
+                    "comment_count": len(sorted_events),
+                    "participants": participants,
+                    "reopened": reopened,
+                    "agent_response_hours": agent_response_hours,
+                    "first_comment_at": self._coerce_iso(sorted_events[0].created_at) if sorted_events else None,
+                    "last_comment_at": self._coerce_iso(sorted_events[-1].created_at) if sorted_events else None,
+                }
+            )
+
+        thread_count = len(thread_events)
+        metrics = {
+            "thread_count": thread_count,
+            "reopened_threads": reopened_threads,
+            "response_rate": (responded_threads / thread_count) if thread_count else 0.0,
+            "response_latencies": response_latencies,
+        }
+        return threads_summary, metrics
+
+    def _serialize_comment(
+        self,
+        comment,
+        comment_type: str,
+        agent_logins: set[str],
+        index: int,
+    ) -> tuple[dict, str, ThreadEvent, str]:
+        body = comment.body or ""
+        created_at = getattr(comment, "created_at", None)
+        updated_at = getattr(comment, "updated_at", None)
+        author_login = getattr(getattr(comment, "user", None), "login", None)
+        classification = self._classify_comment(body)
+        serialized = {
+            "id": getattr(comment, "id", None),
+            "author": author_login,
+            "body": body,
+            "type": comment_type,
+            "classification": classification,
+            "created_at": self._coerce_iso(created_at),
+            "updated_at": self._coerce_iso(updated_at),
+        }
+        if comment_type == "review_comment":
+            serialized["in_reply_to_id"] = getattr(comment, "in_reply_to_id", None)
+        thread_id = getattr(comment, "in_reply_to_id", None) or getattr(comment, "id", None)
+        thread_key = str(thread_id) if thread_id is not None else f"{comment_type}-{index}"
+        event = ThreadEvent(
+            author=author_login,
+            created_at=created_at,
+            is_agent=self._is_agent_login(author_login, agent_logins),
+        )
+        return serialized, thread_key, event, classification
+
+    @staticmethod
+    def _merge_counts(primary: dict[str, int], secondary: dict[str, int]) -> dict[str, int]:
+        totals: dict[str, int] = defaultdict(int)
+        for mapping in (primary, secondary):
+            for label, count in mapping.items():
+                totals[label] += count
+        return dict(totals)
+
+    @staticmethod
+    def _safe_paginated(fetcher: Callable[[], Iterable]) -> list:
+        try:
+            return list(fetcher())
+        except GithubException:
+            return []
+
+    @staticmethod
+    def _sort_events(events: Sequence[ThreadEvent]) -> list[ThreadEvent]:
+        epoch = datetime.fromtimestamp(0, tz=timezone.utc)
+        return sorted(events, key=lambda event: event.created_at or epoch)
+
+    def _collect_timeline(self, repo_full_name: str, pr_number: int, pr=None) -> dict:
+        key = (repo_full_name, pr_number)
+        cached = self._timeline_cache.get(key)
+        now = time.monotonic()
+        if cached and cached[0] > now:
+            return cached[1]
+
+        data = {"events": [], "summary": {"force_pushes": 0, "reopens": 0, "merge_events": 0, "review_requests": 0, "review_dismissals": 0}}
+        try:
+            target_pr = pr or self._get_pull(repo_full_name, pr_number)
+            if not target_pr:
+                self._timeline_cache[key] = (now + self._cache_ttl, data)
+                return data
+            timeline_items = target_pr.get_timeline()
+        except GithubException:
+            timeline_items = []
+
+        events: list[dict] = []
+        summary_counts: dict[str, int] = defaultdict(int)
+        for item in timeline_items:
+            event_type = getattr(item, "event", None)
+            if not event_type:
+                continue
+            if event_type not in {
+                "head_ref_force_pushed",
+                "reopened",
+                "closed",
+                "merged",
+                "review_requested",
+                "review_request_removed",
+                "review_dismissed",
+            }:
+                continue
+            summary_counts[event_type] += 1
+            events.append(
+                {
+                    "type": event_type,
+                    "actor": getattr(getattr(item, "actor", None), "login", None),
+                    "created_at": self._coerce_iso(getattr(item, "created_at", None)),
+                    "commit_id": getattr(item, "head_sha", None) or getattr(item, "commit_id", None),
+                }
+            )
+
+        data["events"] = events
+        data["summary"] = {
+            "force_pushes": summary_counts.get("head_ref_force_pushed", 0),
+            "reopens": summary_counts.get("reopened", 0),
+            "merge_events": summary_counts.get("merged", 0),
+            "review_requests": summary_counts.get("review_requested", 0),
+            "review_dismissals": summary_counts.get("review_dismissed", 0),
+        }
+        self._timeline_cache[key] = (now + self._cache_ttl, data)
+        return data
+
+    def _summarize_commits(self, pr, agent_logins: set[str], timeline_summary: dict) -> dict:
+        try:
+            commits = list(pr.get_commits())
+        except GithubException:
+            commits = []
+
+        commit_entries: list[dict] = []
+        unique_authors: set[str] = set()
+        agent_commits = 0
+        human_commits = 0
+        revert_commits = 0
+        commit_moments: list[dict] = []
+        human_followups = 0
+        rewrite_loops = 0
+
+        for commit in commits:
+            author_login = getattr(commit.author, "login", None)
+            commit_date = getattr(getattr(commit.commit, "author", None), "date", None)
+            message = (commit.commit.message or "").strip()
+            headline = message.splitlines()[0] if message else ""
+            entry = {
+                "sha": getattr(commit, "sha", None),
+                "author": author_login,
+                "authored_at": self._coerce_iso(commit_date),
+                "message_headline": headline[:120],
+            }
+            commit_entries.append(entry)
+            if author_login:
+                unique_authors.add(author_login)
+            is_agent = self._is_agent_login(author_login, agent_logins)
+            if is_agent:
+                agent_commits += 1
+            else:
+                human_commits += 1
+            if message.lower().startswith("revert"):
+                revert_commits += 1
+            commit_moments.append({"author": author_login, "created_at": commit_date, "is_agent": is_agent})
+
+        sorted_moments = sorted(
+            commit_moments,
+            key=lambda meta: meta["created_at"] or datetime.fromtimestamp(0, tz=timezone.utc),
+        )
+        for idx, current in enumerate(sorted_moments[:-1]):
+            nxt = sorted_moments[idx + 1]
+            if current["is_agent"] and not nxt["is_agent"]:
+                delta = self._hours_between(current["created_at"], nxt["created_at"])
+                if delta is not None:
+                    human_followups += 1
+                    if delta <= 48:
+                        rewrite_loops += 1
+        intervals: list[float] = []
+        for idx, current in enumerate(sorted_moments[:-1]):
+            nxt = sorted_moments[idx + 1]
+            delta = self._hours_between(current["created_at"], nxt["created_at"])
+            if delta is not None:
+                intervals.append(delta)
+
+        total_commits = len(commit_entries)
+        summary = {
+            "total_commits": total_commits,
+            "agent_commits": agent_commits,
+            "human_commits": human_commits,
+            "unique_authors": len(unique_authors),
+            "revert_commits": revert_commits,
+            "force_push_events": timeline_summary.get("force_pushes", 0),
+            "human_followup_commits": human_followups,
+            "rewrite_loops": rewrite_loops,
+            "agent_commit_ratio": (agent_commits / total_commits) if total_commits else 0.0,
+            "commits": commit_entries,
+        }
+
+        if intervals:
+            summary["avg_time_between_commits_hours"] = sum(intervals) / len(intervals)
+            summary["max_time_between_commits_hours"] = max(intervals)
+        commit_times = [meta["created_at"] for meta in sorted_moments if meta["created_at"]]
+        if commit_times:
+            summary["lead_time_hours"] = self._hours_between(min(commit_times), max(commit_times))
+
+        return summary
+
+    @staticmethod
+    def _classify_comment(body: str) -> str:
+        text = (body or "").lower()
+        if not text:
+            return "neutral"
+        if any(keyword in text for keyword in ("security", "vulnerability", "xss", "sql injection", "leak")):
+            return "security"
+        if any(keyword in text for keyword in ("nit", "nitpick", "style", "typo")):
+            return "nit"
+        if any(keyword in text for keyword in ("?", "clarify", "explain", "what if", "could you")):
+            return "question"
+        if any(keyword in text for keyword in ("thanks", "great", "nice work", "awesome", "lgtm")):
+            return "praise"
+        if any(keyword in text for keyword in ("bug", "broken", "fix", "incorrect", "fail")):
+            return "bug"
+        return "general"
+
+    @staticmethod
+    def _classify_review(state: str, body: str) -> str:
+        text = (body or "").lower()
+        upper_state = (state or "").upper()
+        if upper_state == "APPROVED":
+            return "approval"
+        if upper_state == "CHANGES_REQUESTED":
+            return "blocking"
+        if "nit" in text:
+            return "nit"
+        if "security" in text or "vulnerability" in text:
+            return "security"
+        if "?" in text or "clarify" in text:
+            return "question"
+        return "general"
+
+    def _is_agent_login(self, login: str | None, agent_logins: set[str]) -> bool:
+        if not login:
+            return False
+        lower = login.lower()
+        if lower in agent_logins:
+            return True
+        mapped = self._agent_map.get(lower)
+        if mapped:
+            return True
+        if lower.endswith("-bot"):
+            return True
+        return any(keyword in lower for keyword in ("copilot", "claude", "gemini", "gpt", "bard", "llama"))
+
+    @staticmethod
+    def _coerce_iso(value) -> str | None:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+
+    @staticmethod
+    def _hours_between(start, end) -> float | None:
+        if not start or not end:
+            return None
+        if isinstance(start, datetime):
+            start_dt = start
+        else:
+            return None
+        if isinstance(end, datetime):
+            end_dt = end
+        else:
+            return None
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        delta_seconds = (end_dt - start_dt).total_seconds()
+        if delta_seconds < 0:
+            return None
+        return delta_seconds / 3600
+
+    @staticmethod
+    def _percentile(values: list[float], percentile: float) -> float:
+        if not values:
+            return 0.0
+        percentile = max(0.0, min(percentile, 100.0))
+        sorted_values = sorted(values)
+        if len(sorted_values) == 1:
+            return sorted_values[0]
+        rank = (len(sorted_values) - 1) * (percentile / 100.0)
+        lower_index = int(math.floor(rank))
+        upper_index = int(math.ceil(rank))
+        lower_value = sorted_values[lower_index]
+        upper_value = sorted_values[upper_index]
+        if lower_index == upper_index:
+            return lower_value
+        fraction = rank - lower_index
+        return lower_value + (upper_value - lower_value) * fraction
 
     def _from_pr_discussion(self, repo_full_name: str, pr_number: int) -> tuple[Optional[str], dict]:
         for body in self._fetch_pr_comments(repo_full_name, pr_number):

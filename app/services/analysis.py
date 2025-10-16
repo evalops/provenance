@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import time
 from typing import TYPE_CHECKING
 
@@ -58,7 +59,21 @@ class AnalysisService:
         timestamp = _now()
         provenance_inputs = request.provenance_data.model_dump()
 
+        github_summary_added = False
         if self._github_resolver and request.pr_number:
+            metadata = self._github_resolver.collect_pr_metadata(
+                repo_full_name=request.repo,
+                pr_number=int(request.pr_number),
+                head_sha=request.head_sha,
+            )
+            if metadata:
+                provenance_inputs["github_metadata"] = metadata
+                summary = metadata.get("review_summary")
+                if summary:
+                    provenance_inputs["github_review_stats"] = summary
+                    github_summary_added = True
+
+        if self._github_resolver and request.pr_number and not github_summary_added:
             github_stats = self._github_resolver.review_stats(
                 repo_full_name=request.repo,
                 pr_number=int(request.pr_number),
@@ -151,7 +166,7 @@ class AnalysisService:
             if session_id:
                 attribution.agent_session_id = session_id
             if evidence:
-                attribution.provenance_marker = str(evidence)
+                attribution.provenance_marker = json.dumps(evidence)
         return ChangedLine(
             analysis_id=analysis_id,
             repo_id=request.repo,

@@ -98,7 +98,8 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - The JSON results are mapped back to the originating changed lines so findings retain repo/PR/file/line attribution.
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
-- When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, review comments, and reviewer identities to fill missing agent attribution (see `app/provenance/github_resolver.py`).
+- When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, review comments, reviewer identities, and PR timelines to fill missing agent attribution and capture structured evidence (see `app/provenance/github_resolver.py`).
+- The resolver also persists PR conversations (thread counts, classification breakdowns, agent response latency), CI outcomes (time-to-green, failed checks), and commit/timeline summaries (force pushes, human follow-ups, rewrite loops) so analytics can surface behavioral signals without re-calling the GitHub API.
 - Built-in heuristics now include a Python import detector that flags risky modules (e.g., `subprocess`, `pickle`); extend this pattern with your own detectors via modular hooks.
 
 ## API Surface
@@ -146,9 +147,9 @@ Example ingestion payload:
 
 ## Agent Insights & Analytics
 
-- `/v1/analytics/summary` now supports additional metrics: `code_volume`, `code_churn_rate`, and `avg_line_complexity` in addition to `risk_rate` and `provenance_coverage`.
-- `/v1/analytics/agents/behavior` returns composite snapshots (volume, churn rate, heuristic complexity, and top vulnerability categories per agent) to power comparison dashboards.
-- Review-focused metrics (`review_comments`, `unique_reviewers`) leverage GitHub PR data when credentials are supplied.
+- `/v1/analytics/summary` now surfaces GitHub-aware metrics alongside the existing risk/volume suite: `code_volume`, `code_churn_rate`, `avg_line_complexity`, `agent_response_rate`, `agent_response_p50_hours`, `agent_response_p90_hours`, `reopened_threads`, `force_push_events`, `rewrite_loops`, `human_followup_commits`, `ci_time_to_green_hours`, `ci_failed_checks`, `agent_commit_ratio`, `commit_lead_time_hours`, and `classification_<label>_count` (e.g., `classification_security_count`).
+- `/v1/analytics/agents/behavior` returns composite snapshots that now blend code/finding metrics with review conversation health (thread counts, response latency, classification breakdowns), CI friction (failures, time-to-green), commit dynamics (force pushes, rewrite loops, human follow-ups), and attention heatmaps (top paths + hot files) per agent.
+- Review-focused metrics (`review_comments`, `unique_reviewers`, `review_events`, `agent_comment_mentions`) continue to leverage GitHub PR data when credentials are supplied; classification metrics reflect the resolver's heuristic labeling of each conversation snippet.
 - Use `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` or query parameters such as `?time_window=14d` to track longer horizons and compare agents.
 
 ## Telemetry Export

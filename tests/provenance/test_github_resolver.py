@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 
 from app.provenance.github_resolver import GitHubProvenanceResolver
@@ -58,11 +59,57 @@ def test_resolver_uses_pr_comments(monkeypatch):
 
 def test_review_stats(monkeypatch):
     resolver = GitHubProvenanceResolver(token="token")
-    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_pr_comments", lambda self, repo, pr: ["Agent-ID: claude", "ok"])
-    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_review_authors", lambda self, repo, pr: ["reviewer-a", "reviewer-b"])
-    monkeypatch.setattr(GitHubProvenanceResolver, "_fetch_review_events", lambda self, repo, pr: 3)
+    now = datetime.now(timezone.utc)
+
+    class StubComment:
+        def __init__(self, *, body: str, author: str, created_at: datetime, comment_id: int, in_reply_to_id: int | None = None):
+            self.body = body
+            self.user = SimpleNamespace(login=author)
+            self.created_at = created_at
+            self.updated_at = created_at
+            self.id = comment_id
+            self.in_reply_to_id = in_reply_to_id
+
+    class StubReview:
+        def __init__(self, *, state: str, body: str, author: str, submitted_at: datetime):
+            self.state = state
+            self.body = body
+            self.user = SimpleNamespace(login=author)
+            self.submitted_at = submitted_at
+
+    class StubPull:
+        def __init__(self):
+            self.created_at = now - timedelta(hours=4)
+            self.merged_at = now
+            self.updated_at = now
+
+        def get_issue_comments(self):
+            return [
+                StubComment(body="Agent-ID: claude", author="reviewer-a", created_at=now - timedelta(hours=3), comment_id=1),
+            ]
+
+        def get_review_comments(self):
+            return [
+                StubComment(body="please fix", author="reviewer-b", created_at=now - timedelta(hours=2), comment_id=2),
+                StubComment(body="updated as requested", author="claude-bot", created_at=now - timedelta(hours=1), comment_id=3, in_reply_to_id=2),
+                StubComment(body="looks good now", author="reviewer-b", created_at=now - timedelta(minutes=30), comment_id=4, in_reply_to_id=2),
+            ]
+
+        def get_reviews(self):
+            return [
+                StubReview(state="COMMENTED", body="Initial thoughts", author="reviewer-a", submitted_at=now - timedelta(hours=3, minutes=30)),
+                StubReview(state="APPROVED", body="Ship it", author="reviewer-b", submitted_at=now - timedelta(minutes=20)),
+            ]
+
+        def get_timeline(self):
+            return []
+
+    monkeypatch.setattr(GitHubProvenanceResolver, "_get_pull", lambda self, repo, pr: StubPull())
     stats = resolver.review_stats("acme/repo", 99)
-    assert stats["review_comment_count"] == 2
+    assert stats["review_comment_count"] == 4
     assert stats["unique_reviewers"] == 2
-    assert stats["review_events"] == 3
+    assert stats["review_events"] == 2
     assert stats["agent_comment_mentions"] == 1
+    assert stats["reopened_threads"] == 1
+    assert stats["approvals"] == 1
+    assert stats["comment_threads"] == 2

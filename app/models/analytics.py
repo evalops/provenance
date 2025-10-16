@@ -54,6 +54,34 @@ class AgentBehaviorSnapshot(BaseModel):
     unique_reviewers: int = Field(0, description="Unique reviewer count across associated PRs.")
     review_events: int = Field(0, description="Total review submissions across associated PRs.")
     agent_comment_mentions: int = Field(0, description="Count of agent markers found in review comments.")
+    comment_threads: int = Field(0, description="Distinct review discussion threads observed.")
+    reopened_threads: int = Field(0, description="Threads where reviewers re-engaged after an agent response.")
+    agent_response_rate: float = Field(0.0, description="Share of threads with an agent response.")
+    agent_response_p50_hours: Optional[float] = Field(
+        None, description="Median response time (hours) between reviewer comment and agent reply."
+    )
+    agent_response_p90_hours: Optional[float] = Field(
+        None, description="P90 response time (hours) between reviewer comment and agent reply."
+    )
+    classification_breakdown: dict[str, int] = Field(
+        default_factory=dict, description="Aggregate comment/review classifications (security, nit, etc.)."
+    )
+    ci_run_count: int = Field(0, description="Number of CI runs/checks evaluated.")
+    ci_failure_count: int = Field(0, description="Number of failing CI runs/checks.")
+    ci_failed_checks: int = Field(0, description="Unique failing CI checks in the window.")
+    ci_time_to_green_hours: Optional[float] = Field(None, description="Median time-to-green across CI runs.")
+    ci_latest_status: Optional[str] = Field(None, description="Most recent CI rollup status observed.")
+    force_push_events: int = Field(0, description="Force-push events recorded on associated PRs.")
+    rewrite_loops: int = Field(0, description="Follow-up human commits arriving within 48h of agent commits.")
+    human_followup_commits: int = Field(0, description="Count of human commits landing immediately after agent commits.")
+    agent_commit_ratio: float = Field(0.0, description="Share of commits authored by the agent.")
+    commit_lead_time_hours: Optional[float] = Field(None, description="Lead time between earliest and latest commits.")
+    top_paths: dict[str, int] = Field(
+        default_factory=dict, description="Most frequently modified top-level paths for the agent."
+    )
+    hot_files: list[str] = Field(
+        default_factory=list, description="Files touched repeatedly (>=3 times) signalling attention hot-spots."
+    )
 
 
 class AgentBehaviorReport(BaseModel):

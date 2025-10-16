@@ -87,6 +87,46 @@ class AnalyticsService:
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="review_comment_count", unit="count")
         if metric == "unique_reviewers":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="unique_reviewers", unit="count")
+        if metric == "review_events":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="review_events", unit="count")
+        if metric == "agent_comment_mentions":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_comment_mentions", unit="count")
+        if metric == "ci_failure_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="ci_failure_count", unit="count")
+        if metric == "ci_run_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="ci_run_count", unit="count")
+        if metric == "time_to_first_review_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="time_to_first_review_hours", unit="hours")
+        if metric == "time_to_first_approval_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="time_to_first_approval_hours", unit="hours")
+        if metric == "time_to_merge_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="time_to_merge_hours", unit="hours")
+        if metric == "agent_response_rate":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_response_rate", unit="ratio")
+        if metric == "agent_response_p50_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_response_p50_hours", unit="hours")
+        if metric == "agent_response_p90_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_response_p90_hours", unit="hours")
+        if metric == "reopened_threads":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="reopened_threads", unit="count")
+        if metric == "comment_threads":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="comment_threads", unit="count")
+        if metric == "force_push_events":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="force_push_events", unit="count")
+        if metric == "rewrite_loops":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="rewrite_loops", unit="count")
+        if metric == "human_followup_commits":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="human_followup_commits", unit="count")
+        if metric == "agent_commit_ratio":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_commit_ratio", unit="ratio")
+        if metric == "ci_time_to_green_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="ci_time_to_green_hours", unit="hours")
+        if metric == "ci_failed_checks":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="ci_failed_checks", unit="count")
+        if metric == "commit_lead_time_hours":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="commit_lead_time_hours", unit="hours")
+        if metric.startswith("classification_") and metric.endswith("_count"):
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key=metric, unit="count")
         raise ValueError(f"Unsupported metric: {metric}")
 
     def agent_behavior_report(
@@ -119,6 +159,43 @@ class AnalyticsService:
             unique_reviewers = sum(stat.get("unique_reviewers", 0) for stat in review_stats)
             review_events = sum(stat.get("review_events", 0) for stat in review_stats)
             agent_mentions = sum(stat.get("agent_comment_mentions", 0) for stat in review_stats)
+            reopened_threads = sum(stat.get("reopened_threads", 0) for stat in review_stats)
+            comment_threads = sum(stat.get("comment_threads", 0) for stat in review_stats)
+            response_rates = [stat.get("agent_response_rate") for stat in review_stats if stat.get("agent_response_rate") is not None]
+            response_p50_values = [stat.get("agent_response_p50_hours") for stat in review_stats if stat.get("agent_response_p50_hours") is not None]
+            response_p90_values = [stat.get("agent_response_p90_hours") for stat in review_stats if stat.get("agent_response_p90_hours") is not None]
+            classification_totals = defaultdict(int)
+            ci_run_total = sum(stat.get("ci_run_count", 0) for stat in review_stats)
+            ci_failure_total = sum(stat.get("ci_failure_count", 0) for stat in review_stats)
+            ci_failed_checks = sum(stat.get("ci_failed_checks", 0) for stat in review_stats)
+            ci_time_to_green_values = [stat.get("ci_time_to_green_hours") for stat in review_stats if stat.get("ci_time_to_green_hours") is not None]
+            ci_latest_status = next((stat.get("ci_latest_status") for stat in reversed(review_stats) if stat.get("ci_latest_status")), None)
+            force_push_events = sum(stat.get("force_push_events", 0) for stat in review_stats)
+            rewrite_loops = sum(stat.get("rewrite_loops", 0) for stat in review_stats)
+            human_followups = sum(stat.get("human_followup_commits", 0) for stat in review_stats)
+            agent_commit_ratio_values = [stat.get("agent_commit_ratio") for stat in review_stats if stat.get("agent_commit_ratio") is not None]
+            commit_lead_time_values = [stat.get("commit_lead_time_hours") for stat in review_stats if stat.get("commit_lead_time_hours") is not None]
+            for stat in review_stats:
+                for label, count in (stat.get("classification_breakdown") or {}).items():
+                    classification_totals[label] += count
+
+            agent_response_rate = statistics.fmean(response_rates) if response_rates else 0.0
+            agent_response_p50 = statistics.median(response_p50_values) if response_p50_values else None
+            agent_response_p90 = statistics.median(response_p90_values) if response_p90_values else None
+            ci_time_to_green = statistics.median(ci_time_to_green_values) if ci_time_to_green_values else None
+            agent_commit_ratio = statistics.fmean(agent_commit_ratio_values) if agent_commit_ratio_values else 0.0
+            commit_lead_time = statistics.median(commit_lead_time_values) if commit_lead_time_values else None
+
+            path_counts = defaultdict(int)
+            file_counts = defaultdict(int)
+            for line in lines:
+                if line.file_path:
+                    parts = line.file_path.split("/", 1)
+                    top_path = parts[0]
+                    path_counts[top_path] += 1
+                    file_counts[line.file_path] += 1
+            top_paths = dict(sorted(path_counts.items(), key=lambda item: item[1], reverse=True)[:3])
+            hot_files = [path for path, count in sorted(file_counts.items(), key=lambda item: item[1], reverse=True) if count >= 3][:5]
             snapshots.append(
                 AgentBehaviorSnapshot(
                     agent_id=agent,
@@ -133,6 +210,24 @@ class AnalyticsService:
                     unique_reviewers=unique_reviewers,
                     review_events=review_events,
                     agent_comment_mentions=agent_mentions,
+                    comment_threads=comment_threads,
+                    reopened_threads=reopened_threads,
+                    agent_response_rate=agent_response_rate,
+                    agent_response_p50_hours=agent_response_p50,
+                    agent_response_p90_hours=agent_response_p90,
+                    classification_breakdown=dict(sorted(classification_totals.items(), key=lambda item: item[1], reverse=True)),
+                    ci_run_count=ci_run_total,
+                    ci_failure_count=ci_failure_total,
+                    ci_failed_checks=ci_failed_checks,
+                    ci_time_to_green_hours=ci_time_to_green,
+                    ci_latest_status=ci_latest_status,
+                    force_push_events=force_push_events,
+                    rewrite_loops=rewrite_loops,
+                    human_followup_commits=human_followups,
+                    agent_commit_ratio=agent_commit_ratio,
+                    commit_lead_time_hours=commit_lead_time,
+                    top_paths=top_paths,
+                    hot_files=hot_files,
                 )
             )
         snapshots.sort(key=lambda snap: snap.agent_id)
@@ -221,18 +316,43 @@ class AnalyticsService:
                 if agent_filter and agent_id != agent_filter:
                     continue
                 findings_by_agent[agent_id].append(finding)
-            review_stats = analysis.provenance_inputs.get("github_review_stats")
-            if review_stats:
-                agents_in_analysis = set()
-                for line in lines:
-                    agent_id = line.attribution.agent.agent_id or "unknown"
-                    if agent_filter and agent_id != agent_filter:
-                        continue
-                    agents_in_analysis.add(agent_id)
-                if not agents_in_analysis and not agent_filter:
-                    agents_in_analysis = {"unknown"}
-                for agent in agents_in_analysis:
-                    review_stats_by_agent[agent].append(review_stats)
+            metadata = analysis.provenance_inputs.get("github_metadata")
+            if metadata:
+                summary = metadata.get("review_summary") or {}
+                if summary:
+                    ci_summary = metadata.get("ci_summary") or {}
+                    commit_summary = metadata.get("commit_summary") or {}
+                    timeline_summary = metadata.get("timeline_summary") or {}
+                    failed_checks = ci_summary.get("failed_checks") or []
+                    combined_summary = {
+                        **summary,
+                        "ci_run_count": ci_summary.get("run_count", 0),
+                        "ci_failure_count": ci_summary.get("failure_count", 0),
+                        "ci_time_to_green_hours": ci_summary.get("time_to_green_hours"),
+                        "ci_failed_checks": len(failed_checks),
+                        "ci_latest_status": ci_summary.get("latest_status"),
+                        "force_push_events": commit_summary.get("force_push_events", 0),
+                        "rewrite_loops": commit_summary.get("rewrite_loops", 0),
+                        "human_followup_commits": commit_summary.get("human_followup_commits", 0),
+                        "agent_commit_ratio": commit_summary.get("agent_commit_ratio", 0.0),
+                        "commit_lead_time_hours": commit_summary.get("lead_time_hours"),
+                        "review_request_events": timeline_summary.get("review_requests", 0),
+                        "reopen_events": timeline_summary.get("reopens", 0),
+                    }
+                    classification_breakdown = summary.get("classification_breakdown") or {}
+                    combined_summary["classification_breakdown"] = classification_breakdown
+                    for label, count in classification_breakdown.items():
+                        combined_summary[f"classification_{label}_count"] = count
+                    agents_in_analysis = set()
+                    for line in lines:
+                        agent_id = line.attribution.agent.agent_id or "unknown"
+                        if agent_filter and agent_id != agent_filter:
+                            continue
+                        agents_in_analysis.add(agent_id)
+                    if not agents_in_analysis and not agent_filter:
+                        agents_in_analysis = {"unknown"}
+                    for agent in agents_in_analysis:
+                        review_stats_by_agent[agent].append(combined_summary)
         return lines_by_agent, findings_by_agent, review_stats_by_agent
 
     @staticmethod
@@ -413,14 +533,22 @@ class AnalyticsService:
         _, _, review_stats_by_agent = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
         for agent, stats in review_stats_by_agent.items():
-            total = sum(entry.get(key, 0) for entry in stats)
+            values = []
+            for entry in stats:
+                value = entry.get(key)
+                if value is None:
+                    continue
+                values.append(value)
+            if not values:
+                values = [0]
+            total = sum(values)
             points.append(
                 MetricPoint(
                     metric=key,
                     agent_id=agent,
                     value=float(total),
-                    numerator=int(total),
-                    denominator=max(len(stats), 1),
+                    numerator=int(total) if isinstance(total, (int, float)) else 0,
+                    denominator=max(len(values), 1),
                     window_start=window_start,
                     window_end=window_end,
                     unit=unit,

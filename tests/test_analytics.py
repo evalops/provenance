@@ -34,11 +34,50 @@ def _bootstrap_store() -> AnalyticsService:
         created_at=now,
         updated_at=now,
         provenance_inputs={
-            "github_review_stats": {
-                "review_comment_count": 2,
-                "unique_reviewers": 1,
-                "review_events": 1,
-                "agent_comment_mentions": 1,
+            "github_metadata": {
+                "review_summary": {
+                    "review_comment_count": 2,
+                    "unique_reviewers": 1,
+                    "review_events": 1,
+                    "agent_comment_mentions": 1,
+                    "time_to_first_review_hours": 1.5,
+                    "time_to_first_approval_hours": 2.0,
+                    "time_to_merge_hours": 5.0,
+                    "approvals": 1,
+                    "requested_changes": 0,
+                    "comment_threads": 1,
+                    "reopened_threads": 0,
+                    "classification_breakdown": {"security": 1, "general": 1},
+                    "agent_response_rate": 1.0,
+                    "agent_response_p50_hours": 0.5,
+                    "agent_response_p90_hours": 0.5,
+                },
+                "ci_summary": {
+                    "run_count": 2,
+                    "failure_count": 1,
+                    "time_to_green_hours": 3.0,
+                    "latest_status": "success",
+                    "failed_checks": ["lint"],
+                },
+                "timeline_summary": {
+                    "force_pushes": 1,
+                    "reopens": 0,
+                    "merge_events": 1,
+                    "review_requests": 1,
+                    "review_dismissals": 0,
+                },
+                "commit_summary": {
+                    "total_commits": 3,
+                    "agent_commits": 2,
+                    "human_commits": 1,
+                    "unique_authors": 2,
+                    "revert_commits": 0,
+                    "force_push_events": 1,
+                    "human_followup_commits": 1,
+                    "rewrite_loops": 1,
+                    "agent_commit_ratio": 0.66,
+                    "lead_time_hours": 6.0,
+                },
             }
         },
     )
@@ -99,11 +138,50 @@ def _bootstrap_store() -> AnalyticsService:
         created_at=record2_time,
         updated_at=record2_time,
         provenance_inputs={
-            "github_review_stats": {
-                "review_comment_count": 3,
-                "unique_reviewers": 2,
-                "review_events": 2,
-                "agent_comment_mentions": 0,
+            "github_metadata": {
+                "review_summary": {
+                    "review_comment_count": 3,
+                    "unique_reviewers": 2,
+                    "review_events": 2,
+                    "agent_comment_mentions": 0,
+                    "time_to_first_review_hours": 0.5,
+                    "time_to_first_approval_hours": 1.0,
+                    "time_to_merge_hours": 4.0,
+                    "approvals": 1,
+                    "requested_changes": 1,
+                    "comment_threads": 2,
+                    "reopened_threads": 1,
+                    "classification_breakdown": {"nit": 1, "question": 1, "general": 1},
+                    "agent_response_rate": 0.5,
+                    "agent_response_p50_hours": 1.0,
+                    "agent_response_p90_hours": 1.5,
+                },
+                "ci_summary": {
+                    "run_count": 1,
+                    "failure_count": 0,
+                    "time_to_green_hours": 1.0,
+                    "latest_status": "success",
+                    "failed_checks": [],
+                },
+                "timeline_summary": {
+                    "force_pushes": 0,
+                    "reopens": 1,
+                    "merge_events": 1,
+                    "review_requests": 2,
+                    "review_dismissals": 0,
+                },
+                "commit_summary": {
+                    "total_commits": 2,
+                    "agent_commits": 1,
+                    "human_commits": 1,
+                    "unique_authors": 2,
+                    "revert_commits": 0,
+                    "force_push_events": 0,
+                    "human_followup_commits": 1,
+                    "rewrite_loops": 0,
+                    "agent_commit_ratio": 0.5,
+                    "lead_time_hours": 2.0,
+                },
             }
         },
     )
@@ -226,6 +304,24 @@ def test_agent_behavior_report_highlights_top_categories():
     assert claude_snapshot.unique_reviewers == 1
     assert claude_snapshot.review_events == 1
     assert claude_snapshot.agent_comment_mentions == 1
+    assert claude_snapshot.comment_threads == 1
+    assert claude_snapshot.reopened_threads == 0
+    assert claude_snapshot.agent_response_rate == pytest.approx(1.0)
+    assert claude_snapshot.agent_response_p50_hours == pytest.approx(0.5)
+    assert claude_snapshot.agent_response_p90_hours == pytest.approx(0.5)
+    assert claude_snapshot.classification_breakdown == {"security": 1, "general": 1}
+    assert claude_snapshot.ci_run_count == 2
+    assert claude_snapshot.ci_failure_count == 1
+    assert claude_snapshot.ci_failed_checks == 1
+    assert claude_snapshot.ci_time_to_green_hours == pytest.approx(3.0)
+    assert claude_snapshot.ci_latest_status == "success"
+    assert claude_snapshot.force_push_events == 1
+    assert claude_snapshot.rewrite_loops == 1
+    assert claude_snapshot.human_followup_commits == 1
+    assert claude_snapshot.agent_commit_ratio == pytest.approx(0.66, rel=1e-2)
+    assert claude_snapshot.commit_lead_time_hours == pytest.approx(6.0)
+    assert claude_snapshot.top_paths == {"services": 3}
+    assert claude_snapshot.hot_files == ["services/orders.py"]
 
     copilot_snapshot = next(s for s in report.snapshots if s.agent_id == "github-copilot")
     assert copilot_snapshot.top_vulnerability_categories == {"code_execution": 2}
@@ -235,6 +331,24 @@ def test_agent_behavior_report_highlights_top_categories():
     assert copilot_snapshot.unique_reviewers == 2
     assert copilot_snapshot.review_events == 2
     assert copilot_snapshot.agent_comment_mentions == 0
+    assert copilot_snapshot.comment_threads == 2
+    assert copilot_snapshot.reopened_threads == 1
+    assert copilot_snapshot.agent_response_rate == pytest.approx(0.5)
+    assert copilot_snapshot.agent_response_p50_hours == pytest.approx(1.0)
+    assert copilot_snapshot.agent_response_p90_hours == pytest.approx(1.5)
+    assert copilot_snapshot.classification_breakdown == {"general": 1, "nit": 1, "question": 1}
+    assert copilot_snapshot.ci_run_count == 1
+    assert copilot_snapshot.ci_failure_count == 0
+    assert copilot_snapshot.ci_failed_checks == 0
+    assert copilot_snapshot.ci_time_to_green_hours == pytest.approx(1.0)
+    assert copilot_snapshot.ci_latest_status == "success"
+    assert copilot_snapshot.force_push_events == 0
+    assert copilot_snapshot.rewrite_loops == 0
+    assert copilot_snapshot.human_followup_commits == 1
+    assert copilot_snapshot.agent_commit_ratio == pytest.approx(0.5)
+    assert copilot_snapshot.commit_lead_time_hours == pytest.approx(2.0)
+    assert copilot_snapshot.top_paths == {"web": 3}
+    assert copilot_snapshot.hot_files == ["web/forms.ts"]
 
 
 def test_mttr_and_suppression_metrics():
@@ -285,6 +399,13 @@ def test_mttr_and_suppression_metrics():
     suppression_series = analytics.query_series(time_window="1d", metric="suppression_rate", group_by="agent_id")
     review_series = analytics.query_series(time_window="1d", metric="review_comments", group_by="agent_id")
     reviewer_series = analytics.query_series(time_window="1d", metric="unique_reviewers", group_by="agent_id")
+    response_series = analytics.query_series(time_window="1d", metric="agent_response_rate", group_by="agent_id")
+    force_push_series = analytics.query_series(time_window="1d", metric="force_push_events", group_by="agent_id")
+    rewrite_series = analytics.query_series(time_window="1d", metric="rewrite_loops", group_by="agent_id")
+    ci_green_series = analytics.query_series(time_window="1d", metric="ci_time_to_green_hours", group_by="agent_id")
+    classification_series = analytics.query_series(time_window="1d", metric="classification_security_count", group_by="agent_id")
+    followup_series = analytics.query_series(time_window="1d", metric="human_followup_commits", group_by="agent_id")
+    commit_ratio_series = analytics.query_series(time_window="1d", metric="agent_commit_ratio", group_by="agent_id")
 
     mttr_point = next(point for point in mttr_series.data if point.agent_id == "github-copilot")
     assert mttr_point.value == pytest.approx(5.0)
@@ -298,3 +419,24 @@ def test_mttr_and_suppression_metrics():
 
     reviewer_point = next(point for point in reviewer_series.data if point.agent_id == "github-copilot")
     assert reviewer_point.value == 2.0
+
+    response_point = next(point for point in response_series.data if point.agent_id == "github-copilot")
+    assert response_point.value == pytest.approx(0.5)
+
+    force_push_point = next(point for point in force_push_series.data if point.agent_id == "claude-3-opus")
+    assert force_push_point.value == 1.0
+
+    rewrite_point = next(point for point in rewrite_series.data if point.agent_id == "claude-3-opus")
+    assert rewrite_point.value == 1.0
+
+    ci_green_point = next(point for point in ci_green_series.data if point.agent_id == "claude-3-opus")
+    assert ci_green_point.value == pytest.approx(3.0)
+
+    classification_point = next(point for point in classification_series.data if point.agent_id == "claude-3-opus")
+    assert classification_point.value == 1.0
+
+    followup_point = next(point for point in followup_series.data if point.agent_id == "claude-3-opus")
+    assert followup_point.value == 1.0
+
+    commit_ratio_point = next(point for point in commit_ratio_series.data if point.agent_id == "github-copilot")
+    assert commit_ratio_point.value == pytest.approx(0.5)
