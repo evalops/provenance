@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 
 from fastapi import BackgroundTasks
 
@@ -20,6 +21,7 @@ from app.schemas.analysis import AnalysisIngestionRequest, ChangedLinePayload
 from app.services.analytics import AnalyticsService
 from app.services.detection import DetectionService
 from app.services.governance import GovernanceService
+from app.telemetry import increment_analysis_ingestion, record_analysis_duration, record_analysis_findings
 
 
 def _now() -> datetime:
@@ -72,6 +74,7 @@ class AnalysisService:
             background_tasks.add_task(self.execute_analysis, analysis_id)
         else:
             self.execute_analysis(analysis_id)
+        increment_analysis_ingestion()
         return record
 
     def execute_analysis(self, analysis_id: str) -> None:
@@ -79,6 +82,7 @@ class AnalysisService:
         if not record:
             return
         try:
+            started = time.perf_counter()
             record.status = AnalysisStatus.IN_PROGRESS
             record.updated_at = _now()
             self._store.update_analysis(record)
@@ -95,6 +99,9 @@ class AnalysisService:
             record.status = AnalysisStatus.COMPLETED
             record.updated_at = _now()
             self._store.update_analysis(record)
+            duration = time.perf_counter() - started
+            record_analysis_duration(duration)
+            record_analysis_findings(len(findings))
         except Exception as exc:  # pragma: no cover - defensive catch for background jobs
             record.status = AnalysisStatus.FAILED
             record.updated_at = _now()

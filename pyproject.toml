@@ -11,7 +11,9 @@ dependencies = [
     "pydantic-settings>=2.2,<3.0",
     "python-dateutil>=2.9,<3.0",
     "redis>=5.0,<6.0",
-    "semgrep>=1.64,<2.0"
+    "semgrep>=1.64,<2.0",
+    "opentelemetry-api>=1.25,<2.0",
+    "opentelemetry-sdk>=1.25,<2.0"
 ]
 
 [project.optional-dependencies]
@@ -46,5 +48,6 @@ dashboard = [
     "httpx>=0.27,<0.28"
 ]
 warehouse = [
-    "snowflake-connector-python>=3.10,<4.0"
+    "snowflake-connector-python>=3.10,<4.0",
+    "google-cloud-bigquery>=3.16,<4.0"
 ]

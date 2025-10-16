@@ -17,11 +17,17 @@ class EventSink(Protocol):
     def publish(self, event: dict) -> None:  # pragma: no cover - interface
         ...
 
+    def close(self) -> None:  # pragma: no cover - interface
+        ...
+
 
 class NullEventSink:
     """No-op sink used when telemetry is disabled."""
 
     def publish(self, event: dict) -> None:
+        return None
+
+    def close(self) -> None:
         return None
 
 
@@ -39,21 +45,60 @@ class FileEventSink:
             handle.write(payload)
             handle.write("\n")
 
+    def close(self) -> None:
+        return None
+
 
 class BigQueryEventSink:
-    """Buffers events for export to BigQuery."""
+    """Writes events into BigQuery using the Python client."""
 
-    def __init__(self, project: str, dataset: str, table: str) -> None:
-        self.project = project
-        self.dataset = dataset
-        self.table = table
+    def __init__(
+        self,
+        project: str,
+        dataset: str,
+        table: str,
+        credentials_path: str | None = None,
+        batch_size: int = 50,
+    ) -> None:
+        try:
+            from google.cloud import bigquery  # type: ignore
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "BigQuery backend requires google-cloud-bigquery. Install via `uv sync --group warehouse`."
+            ) from exc
+
+        if credentials_path:
+            self._client = bigquery.Client.from_service_account_json(credentials_path, project=project)
+        else:
+            self._client = bigquery.Client(project=project)
+        self._table_id = f"{project}.{dataset}.{table}"
+        self._batch_size = batch_size
         self._buffer: list[dict] = []
         self._lock = threading.Lock()
 
     def publish(self, event: dict) -> None:
+        row = self._to_row(event)
         with self._lock:
-            self._buffer.append(event)
-        # Placeholder for actual BigQuery load job integration.
+            self._buffer.append(row)
+            if len(self._buffer) >= self._batch_size:
+                self._flush_locked()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._buffer:
+                self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        errors = self._client.insert_rows_json(self._table_id, self._buffer)
+        if errors:  # pragma: no cover
+            raise RuntimeError(f"Failed to insert BigQuery rows: {errors}")
+        self._buffer.clear()
+
+    @staticmethod
+    def _to_row(event: dict) -> dict:
+        event_time = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        payload = json.loads(json.dumps(event, separators=(",", ":")))
+        return {"event_time": event_time, "payload": payload}
 
 
 class SnowflakeEventSink:
@@ -69,6 +114,7 @@ class SnowflakeEventSink:
         table: str,
         warehouse: str | None = None,
         role: str | None = None,
+        batch_size: int = 25,
     ) -> None:
         try:
             import snowflake.connector  # type: ignore
@@ -92,29 +138,40 @@ class SnowflakeEventSink:
         self._table = table
         self._lock = threading.Lock()
         self._connection = None
-
-    def _ensure_connection(self):
-        if self._connection is None or getattr(self._connection, "is_closed", lambda: True)():
-            self._connection = self._connector.connect(**self._conn_kwargs)
+        self._batch_size = batch_size
+        self._buffer: list[tuple[str, str]] = []
 
     def publish(self, event: dict) -> None:
         payload = json.dumps(event, separators=(",", ":"), sort_keys=True)
         event_time = event.get("timestamp") or datetime.now(timezone.utc).isoformat()
         with self._lock:
-            self._ensure_connection()
-            assert self._connection is not None  # for type checkers
-            with self._connection.cursor() as cursor:
-                cursor.execute(
-                    f"INSERT INTO {self._table} (event_time, payload) SELECT %s::timestamp_ltz, PARSE_JSON(%s)",
-                    (event_time, payload),
-                )
-            self._connection.commit()
+            self._buffer.append((event_time, payload))
+            if len(self._buffer) >= self._batch_size:
+                self._flush_locked()
 
     def close(self) -> None:
         with self._lock:
+            self._flush_locked()
             if self._connection is not None:
                 self._connection.close()
                 self._connection = None
+
+    def _ensure_connection(self) -> None:
+        if self._connection is None or getattr(self._connection, "is_closed", lambda: True)():
+            self._connection = self._connector.connect(**self._conn_kwargs)
+
+    def _flush_locked(self) -> None:
+        if not self._buffer:
+            return
+        self._ensure_connection()
+        assert self._connection is not None
+        with self._connection.cursor() as cursor:
+            cursor.executemany(
+                f"INSERT INTO {self._table} (event_time, payload) SELECT %s::timestamp_ltz, PARSE_JSON(%s)",
+                self._buffer,
+            )
+        self._connection.commit()
+        self._buffer.clear()
 
     def __del__(self):  # pragma: no cover - best effort cleanup
         try:
@@ -132,7 +189,13 @@ def sink_from_settings() -> EventSink:
     if backend == "bigquery":
         if not (settings.timeseries_project and settings.timeseries_dataset and settings.timeseries_table):
             raise ValueError("BigQuery backend requires project, dataset, and table configuration")
-        return BigQueryEventSink(settings.timeseries_project, settings.timeseries_dataset, settings.timeseries_table)
+        return BigQueryEventSink(
+            project=settings.timeseries_project,
+            dataset=settings.timeseries_dataset,
+            table=settings.timeseries_table,
+            credentials_path=settings.timeseries_credentials_path,
+            batch_size=settings.timeseries_batch_size,
+        )
     if backend == "snowflake":
         if not (
             settings.timeseries_project
@@ -154,6 +217,7 @@ def sink_from_settings() -> EventSink:
             table=settings.timeseries_table,
             warehouse=settings.timeseries_warehouse,
             role=settings.timeseries_role,
+            batch_size=settings.timeseries_batch_size,
         )
     if backend in {"off", "none", "disabled"}:
         return NullEventSink()

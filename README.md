@@ -66,10 +66,14 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_TIMESERIES_DATABASE` | Warehouse database name (Snowflake only) | *(unset)* |
 | `PROVENANCE_TIMESERIES_DATASET` | Dataset/schema for warehouse exports | *(unset)* |
 | `PROVENANCE_TIMESERIES_TABLE` | Destination table for warehouse exports | *(unset)* |
+| `PROVENANCE_TIMESERIES_CREDENTIALS_PATH` | Service account JSON for BigQuery (optional) | *(unset)* |
 | `PROVENANCE_TIMESERIES_USER` | Warehouse service user (Snowflake) | *(unset)* |
 | `PROVENANCE_TIMESERIES_PASSWORD` | Warehouse password/secret (Snowflake) | *(unset)* |
 | `PROVENANCE_TIMESERIES_WAREHOUSE` | Snowflake warehouse to use | *(unset)* |
 | `PROVENANCE_TIMESERIES_ROLE` | Snowflake role to assume | *(unset)* |
+| `PROVENANCE_TIMESERIES_BATCH_SIZE` | Buffer size before flushing warehouse writes | `25` |
+| `PROVENANCE_OTEL_ENABLED` | Enable OpenTelemetry metrics export | `false` |
+| `PROVENANCE_OTEL_EXPORTER` | Metrics exporter target (`console`) | `console` |
 
 ## Detection with Semgrep
 
@@ -138,6 +142,7 @@ Example ingestion payload:
 - Switch `PROVENANCE_TIMESERIES_BACKEND` to `bigquery` or `snowflake` and provide the project/database/dataset/table knobs to buffer events for warehouse loaders.
 - Point the backend to `off` to disable exports entirely.
 - Install warehouse dependencies when needed: `uv sync --group warehouse` (installs `snowflake-connector-python`).
+- Set `PROVENANCE_OTEL_ENABLED=true` to emit OpenTelemetry metrics (currently using the console exporter by default).
 - Event payloads include per-agent code volume, churn rates, complexity heuristics, and counts by finding category/severity.
 
 ## Dashboard

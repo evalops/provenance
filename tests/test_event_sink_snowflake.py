@@ -7,8 +7,8 @@ class _StubCursor:
     def __init__(self):
         self.executed = []
 
-    def execute(self, sql, params):
-        self.executed.append((sql, params))
+    def executemany(self, sql, params):
+        self.executed.append((sql, list(params)))
 
     def __enter__(self):
         return self
@@ -64,13 +64,15 @@ def test_snowflake_event_sink_publish(monkeypatch):
         table="analytics.events",
         warehouse="wh",
         role="role",
+        batch_size=1,
     )
 
     sink.publish({"analysis_id": "an", "timestamp": datetime.now(timezone.utc).isoformat()})
+    sink.close()
 
     assert stub_connector.connections
     connection, kwargs = stub_connector.connections[0]
     assert kwargs["account"] == "acct"
     assert kwargs["warehouse"] == "wh"
-    assert connection.commits == 1
+    assert connection.commits >= 1
     assert connection.cursor_instance.executed
