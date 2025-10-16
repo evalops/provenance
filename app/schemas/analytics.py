@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.models.analytics import AnalyticsSeries
+from app.models.analytics import AnalyticsSeries, AgentBehaviorReport
 
 
 class AnalyticsSummaryResponse(BaseModel):
     """Response for GET /v1/analytics/summary."""
 
     result: AnalyticsSeries
+    request_id: str
+
+
+class AgentBehaviorResponse(BaseModel):
+    """Response for GET /v1/analytics/agents/behavior."""
+
+    report: AgentBehaviorReport
     request_id: str
 
 

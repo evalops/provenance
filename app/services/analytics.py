@@ -6,8 +6,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import re
 
-from app.models.analytics import AnalyticsSeries, MetricPoint
-from app.models.domain import AnalysisRecord, ChangedLine, Finding
+from app.models.analytics import AnalyticsSeries, MetricPoint, AgentBehaviorReport, AgentBehaviorSnapshot
+from app.models.domain import AnalysisRecord, ChangedLine, Finding, ChangeType
 from app.repositories.redis_store import RedisWarehouse
 
 
@@ -63,17 +63,170 @@ class AnalyticsService:
         window = _parse_window(time_window)
         window_end = _now()
         window_start = window_end - window
-        analyses = [
-            analysis
-            for analysis in self._store.list_analyses()
-            if analysis.created_at >= window_start and analysis.status == analysis.status.COMPLETED
-        ]
+        analyses = self._filter_analyses(window_start)
 
         if metric == "risk_rate":
             return self._compute_risk_rate(analyses, window_start, window_end, category, agent_id)
         if metric == "provenance_coverage":
             return self._compute_provenance_coverage(analyses, window_start, window_end, agent_id)
+        if metric == "code_volume":
+            return self._compute_code_volume(analyses, window_start, window_end, agent_id)
+        if metric == "code_churn_rate":
+            return self._compute_churn_rate(analyses, window_start, window_end, agent_id)
+        if metric == "avg_line_complexity":
+            return self._compute_avg_complexity(analyses, window_start, window_end, agent_id)
         raise ValueError(f"Unsupported metric: {metric}")
+
+    def agent_behavior_report(
+        self,
+        time_window: str,
+        agent_id: str | None = None,
+        top_categories: int = 3,
+    ) -> AgentBehaviorReport:
+        window = _parse_window(time_window)
+        window_end = _now()
+        window_start = window_end - window
+        analyses = self._filter_analyses(window_start)
+        snapshots: list[AgentBehaviorSnapshot] = []
+        lines_by_agent, findings_by_agent = self._collect_window_data(analyses, agent_id)
+        for agent, lines in lines_by_agent.items():
+            code_volume = len(lines)
+            churn_lines = sum(1 for line in lines if line.change_type in {ChangeType.MODIFIED, ChangeType.DELETED})
+            churn_rate = (churn_lines / code_volume) if code_volume else 0.0
+            complexity_values = [self._line_complexity(line) for line in lines if (line.content or "").strip()]
+            avg_complexity = (sum(complexity_values) / len(complexity_values)) if complexity_values else 0.0
+            category_counts = defaultdict(int)
+            for finding in findings_by_agent.get(agent, []):
+                category_counts[finding.category] += 1
+            top_categories_map = dict(sorted(category_counts.items(), key=lambda item: item[1], reverse=True)[:top_categories])
+            snapshots.append(
+                AgentBehaviorSnapshot(
+                    agent_id=agent,
+                    code_volume=code_volume,
+                    churn_lines=churn_lines,
+                    churn_rate=churn_rate,
+                    avg_line_complexity=avg_complexity,
+                    top_vulnerability_categories=top_categories_map,
+                )
+            )
+        snapshots.sort(key=lambda snap: snap.agent_id)
+        return AgentBehaviorReport(window_start=window_start, window_end=window_end, snapshots=snapshots)
+
+    def _filter_analyses(self, window_start: datetime) -> list[AnalysisRecord]:
+        return [
+            analysis
+            for analysis in self._store.list_analyses()
+            if analysis.created_at >= window_start and analysis.status == analysis.status.COMPLETED
+        ]
+
+    def _collect_window_data(
+        self, analyses: list[AnalysisRecord], agent_filter: str | None
+    ) -> tuple[dict[str, list[ChangedLine]], dict[str, list[Finding]]]:
+        lines_by_agent: dict[str, list[ChangedLine]] = defaultdict(list)
+        findings_by_agent: dict[str, list[Finding]] = defaultdict(list)
+        for analysis in analyses:
+            lines = self._store.get_changed_lines(analysis.analysis_id)
+            findings = self._store.list_findings(analysis.analysis_id)
+            for line in lines:
+                agent_id = line.attribution.agent.agent_id or "unknown"
+                if agent_filter and agent_id != agent_filter:
+                    continue
+                lines_by_agent[agent_id].append(line)
+            for finding in findings:
+                agent_id = finding.attribution.agent.agent_id or "unknown"
+                if agent_filter and agent_id != agent_filter:
+                    continue
+                findings_by_agent[agent_id].append(finding)
+        return lines_by_agent, findings_by_agent
+
+    @staticmethod
+    def _line_complexity(line: ChangedLine) -> int:
+        content = line.content or ""
+        return sum(1 for char in content if not char.isspace())
+
+    def _compute_code_volume(
+        self,
+        analyses: list[AnalysisRecord],
+        window_start: datetime,
+        window_end: datetime,
+        agent_filter: str | None,
+    ) -> AnalyticsSeries:
+        lines_by_agent, _ = self._collect_window_data(analyses, agent_filter)
+        points: list[MetricPoint] = []
+        for agent, lines in lines_by_agent.items():
+            total_lines = len(lines)
+            points.append(
+                MetricPoint(
+                    metric="code_volume",
+                    agent_id=agent,
+                    value=float(total_lines),
+                    numerator=total_lines,
+                    denominator=1,
+                    window_start=window_start,
+                    window_end=window_end,
+                    unit="lines",
+                )
+            )
+        return AnalyticsSeries(metric="code_volume", group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
+
+    def _compute_churn_rate(
+        self,
+        analyses: list[AnalysisRecord],
+        window_start: datetime,
+        window_end: datetime,
+        agent_filter: str | None,
+    ) -> AnalyticsSeries:
+        lines_by_agent, _ = self._collect_window_data(analyses, agent_filter)
+        points: list[MetricPoint] = []
+        for agent, lines in lines_by_agent.items():
+            total_lines = len(lines)
+            churn_lines = sum(1 for line in lines if line.change_type in {ChangeType.MODIFIED, ChangeType.DELETED})
+            value = (churn_lines / total_lines) * 100 if total_lines else 0.0
+            points.append(
+                MetricPoint(
+                    metric="code_churn_rate",
+                    agent_id=agent,
+                    value=value,
+                    numerator=churn_lines,
+                    denominator=total_lines if total_lines else 1,
+                    window_start=window_start,
+                    window_end=window_end,
+                    unit="percent",
+                )
+            )
+        return AnalyticsSeries(metric="code_churn_rate", group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
+
+    def _compute_avg_complexity(
+        self,
+        analyses: list[AnalysisRecord],
+        window_start: datetime,
+        window_end: datetime,
+        agent_filter: str | None,
+    ) -> AnalyticsSeries:
+        lines_by_agent, _ = self._collect_window_data(analyses, agent_filter)
+        points: list[MetricPoint] = []
+        for agent, lines in lines_by_agent.items():
+            complexity_values = [self._line_complexity(line) for line in lines if (line.content or "").strip()]
+            total_complexity = sum(complexity_values)
+            count = len(complexity_values)
+            avg_complexity = (total_complexity / count) if count else 0.0
+            points.append(
+                MetricPoint(
+                    metric="avg_line_complexity",
+                    agent_id=agent,
+                    value=avg_complexity,
+                    numerator=int(total_complexity),
+                    denominator=count if count else 1,
+                    window_start=window_start,
+                    window_end=window_end,
+                    unit="avg_non_whitespace_chars",
+                )
+            )
+        return AnalyticsSeries(
+            metric="avg_line_complexity",
+            group_by="agent_id",
+            data=sorted(points, key=lambda p: p.agent_id),
+        )
 
     def _compute_risk_rate(
         self,

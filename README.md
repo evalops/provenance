@@ -8,7 +8,7 @@ Modern teams mix human and AI-generated code. This service makes that blend obse
 
 - **Attribution** – Trace each changed line to the producing agent/session via provenance markers supplied at ingestion.
 - **Detection** – Run Semgrep rule packs on the diff to flag risky patterns (SQLi, `eval`, etc.).
-- **Analytics** – Produce KPIs such as agent-level risk rate, provenance coverage, and trend deltas.
+- **Analytics** – Produce KPIs such as agent-level risk rate, provenance coverage, volume/churn, and trend deltas.
 - **Governance** – Expose policy decisions (allow/block/warn) with evidence that maps back to repos, PRs, files, and lines.
 
 The codebase adheres to the requirements in `Agent Code Provenance & Risk Analytics service` specification.
@@ -81,7 +81,8 @@ All settings can be driven by environment variables prefixed with `PROVENANCE_`.
 | `/v1/analysis` | `POST` | Submit a pull request (diff + provenance) for asynchronous analysis |
 | `/v1/analysis/{id}` | `GET` | Poll analysis status, findings count, and risk summary snapshot |
 | `/v1/analysis/{id}/decision` | `GET` | Fetch the governance decision (allow/block/warn) with evidence |
-| `/v1/analytics/summary` | `GET` | Retrieve aggregated KPIs (risk rate, provenance coverage, etc.) |
+| `/v1/analytics/summary` | `GET` | Retrieve aggregated KPIs (risk rate, provenance, volume, churn, complexity, etc.) |
+| `/v1/analytics/agents/behavior` | `GET` | Retrieve composite behavioral snapshots for each agent |
 
 Example ingestion payload:
 
@@ -113,6 +114,12 @@ Example ingestion payload:
   }
 }
 ```
+
+## Agent Insights & Analytics
+
+- `/v1/analytics/summary` now supports additional metrics: `code_volume`, `code_churn_rate`, and `avg_line_complexity` in addition to `risk_rate` and `provenance_coverage`.
+- `/v1/analytics/agents/behavior` returns composite snapshots (volume, churn rate, heuristic complexity, and top vulnerability categories per agent) to power comparison dashboards.
+- Use `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` or query parameters such as `?time_window=14d` to track longer horizons and compare agents.
 
 ## Data Persistence Model
 
