@@ -1,0 +1,23 @@
+rules:
+  - id: sql-injection-concat
+    message: "Potential SQL injection due to string concatenation with dynamic input."
+    severity: ERROR
+    languages:
+      - python
+      - javascript
+      - typescript
+      - go
+      - java
+      - csharp
+    pattern-regex: "(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE).*(\\+|\\%|format\\()"
+
+  - id: dangerous-eval
+    message: "Use of eval/exec detected; consider safer alternatives."
+    severity: WARNING
+    languages:
+      - python
+      - javascript
+      - typescript
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
