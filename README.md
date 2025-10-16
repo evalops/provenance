@@ -156,6 +156,11 @@ Example ingestion payload:
 - Set `PROVENANCE_DASHBOARD_API` to point at your deployed API when running remotely.
 - To enable trend charts, set `PROVENANCE_DASHBOARD_EVENTS` to a path containing the exported JSONL events (defaults to `data/timeseries_events.jsonl`).
 
+## SDK & Schema
+
+- Generate an OpenAPI schema with `make docs` (writes `openapi.json`).
+- A lightweight synchronous client lives in `clients/python`; use `ProvenanceClient` for basic ingestion/status/analytics calls.
+
 ## Data Persistence Model
 
 - **Analyses** – Stored as JSON blobs keyed by `analysis:{analysis_id}` with a sorted set index for time-window queries.
