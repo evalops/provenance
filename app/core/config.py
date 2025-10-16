@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     semgrep_config_path: str | None = None
     timeseries_backend: str = "file"
     timeseries_path: str = "data/timeseries_events.jsonl"
+    timeseries_project: str | None = None
+    timeseries_dataset: str | None = None
+    timeseries_table: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

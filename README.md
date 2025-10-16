@@ -59,8 +59,11 @@ All settings can be driven by environment variables prefixed with `PROVENANCE_`.
 | `PROVENANCE_RISK_HIGH_SEVERITY_THRESHOLD` | Number of high-severity findings before issuing a warn | `1` |
 | `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` | Default lookback window for analytics | `7d` |
 | `PROVENANCE_SEMGREP_CONFIG_PATH` | Override path/URL for Semgrep configuration | *(bundled rules)* |
-| `PROVENANCE_TIMESERIES_BACKEND` | Backend for analytics event export (`file`, `off`) | `file` |
+| `PROVENANCE_TIMESERIES_BACKEND` | Backend for analytics event export (`file`, `bigquery`, `snowflake`, `off`) | `file` |
 | `PROVENANCE_TIMESERIES_PATH` | File path for JSONL events when using `file` backend | `data/timeseries_events.jsonl` |
+| `PROVENANCE_TIMESERIES_PROJECT` | Cloud project/account for warehouse exports | *(unset)* |
+| `PROVENANCE_TIMESERIES_DATASET` | Dataset/schema for warehouse exports | *(unset)* |
+| `PROVENANCE_TIMESERIES_TABLE` | Destination table for warehouse exports | *(unset)* |
 
 ## Detection with Semgrep
 
@@ -126,7 +129,8 @@ Example ingestion payload:
 ## Telemetry Export
 
 - Each analysis generates an `analysis_metrics` event written to `data/timeseries_events.jsonl` by default.
-- Point `PROVENANCE_TIMESERIES_BACKEND` to `off` to disable, or override `PROVENANCE_TIMESERIES_PATH` to ship events into a mounted volume for downstream ingestion (e.g., BigQuery/Snowflake loaders).
+- Switch `PROVENANCE_TIMESERIES_BACKEND` to `bigquery` or `snowflake` and provide the project/dataset/table knobs to buffer events for warehouse loaders.
+- Point the backend to `off` to disable exports entirely.
 - Event payloads include per-agent code volume, churn rates, complexity heuristics, and counts by finding category/severity.
 
 ## Dashboard
