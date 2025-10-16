@@ -97,6 +97,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
 - When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, and discussion comments to fill missing agent attribution (see `app/provenance/github_resolver.py`).
+- Built-in heuristics now include a Python import detector that flags risky modules (e.g., `subprocess`, `pickle`); extend this pattern with your own detectors via modular hooks.
 
 ## API Surface
 

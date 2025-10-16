@@ -36,10 +36,11 @@ class DetectionService:
     ) -> None:
         module_paths = settings.detector_module_paths
         external_detectors = self._load_external_detectors(module_paths)
+        builtin_detectors: list[BaseDetector] = [PythonImportsDetector()]
         if detectors is None:
             config_override = semgrep_config_path or settings.semgrep_config_path
             detectors = [SemgrepDetector(config_path=config_override)]
-        self._detectors = list(detectors) + external_detectors
+        self._detectors = list(detectors) + builtin_detectors + external_detectors
 
     def run(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         findings: list[Finding] = []
@@ -204,6 +205,36 @@ class SemgrepDetector(BaseDetector):
                     attribution=changed_line.attribution,
                 )
             )
+        return findings
+
+
+class PythonImportsDetector(BaseDetector):
+    name = "python_imports"
+    rule_key = "PY001"
+    category = "python_insecure_import"
+    default_severity = SeverityLevel.MEDIUM
+
+    SUSPICIOUS_MODULES = {"pickle", "subprocess", "os", "tempfile", "shlex"}
+
+    def execute(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
+        findings: list[Finding] = []
+        for line in lines:
+            if (line.language or "").lower() != "python":
+                continue
+            content = (line.content or "").strip()
+            if not content.startswith("import") and not content.startswith("from"):
+                continue
+            for module in self.SUSPICIOUS_MODULES:
+                if f"import {module}" in content or f"from {module}" in content:
+                    findings.append(
+                        self._build_finding(
+                            record,
+                            line,
+                            f"Import of {module} detected; ensure usage is secure.",
+                            severity=SeverityLevel.MEDIUM,
+                        )
+                    )
+                    break
         return findings
 
 

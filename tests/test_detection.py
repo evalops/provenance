@@ -111,3 +111,35 @@ def test_detection_service_loads_external_detectors(monkeypatch):
 
     findings = detection.run(record, [line])
     assert any(f.engine_name == "external" for f in findings)
+
+
+def test_python_import_detector_triggers():
+    detection = DetectionService()
+    now = datetime.now(timezone.utc)
+    record = AnalysisRecord(
+        analysis_id="an_py",
+        status=AnalysisStatus.IN_PROGRESS,
+        repo_id="acme",
+        pr_number="1",
+        base_sha="base",
+        head_sha="head",
+        created_at=now,
+        updated_at=now,
+        provenance_inputs={}
+    )
+    line = ChangedLine(
+        analysis_id=record.analysis_id,
+        repo_id=record.repo_id,
+        pr_number=record.pr_number,
+        head_sha=record.head_sha,
+        file_path="svc.py",
+        line_number=1,
+        change_type=ChangeType.ADDED,
+        timestamp=now,
+        branch="feature",
+        language="python",
+        content="import subprocess",
+        attribution=ProvenanceAttribution(agent=AgentIdentity(agent_id="human")),
+    )
+    findings = detection.run(record, [line])
+    assert any(f.rule_key == "PY001" for f in findings)
