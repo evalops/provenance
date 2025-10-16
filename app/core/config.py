@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     timeseries_project: str | None = None
     timeseries_dataset: str | None = None
     timeseries_table: str | None = None
+    timeseries_database: str | None = None
+    timeseries_user: str | None = None
+    timeseries_password: str | None = None
+    timeseries_role: str | None = None
+    timeseries_warehouse: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 
