@@ -190,6 +190,23 @@ make compile
 make test
 ```
 
+## Containerisation
+
+Use the provided Dockerfile to build and run the API locally:
+
+```bash
+docker build -t provenance-api .
+docker run --rm -p 8000:8000 provenance-api
+```
+
+Or bring up the service plus Redis via docker compose:
+
+```bash
+docker compose up --build
+```
+
+The API will be available at http://localhost:8000 with Prometheus metrics (if enabled) exposed at `/metrics`.
+
 ## Next Steps / TODO
 
 - Wire Semgrep to enterprise rule registries or rule bundles.
