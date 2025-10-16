@@ -12,6 +12,7 @@ from app.services.analytics import AnalyticsService
 from app.services.analysis import AnalysisService
 from app.services.detection import DetectionService
 from app.services.governance import GovernanceService
+from app.telemetry import sink_from_settings, EventSink
 
 
 @lru_cache
@@ -30,8 +31,13 @@ def get_detection_service() -> DetectionService:
 
 
 @lru_cache
+def get_event_sink() -> EventSink:
+    return sink_from_settings()
+
+
+@lru_cache
 def get_analytics_service() -> AnalyticsService:
-    return AnalyticsService(get_store())
+    return AnalyticsService(get_store(), sink=get_event_sink())
 
 
 @lru_cache

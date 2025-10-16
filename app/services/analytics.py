@@ -9,6 +9,7 @@ import re
 from app.models.analytics import AnalyticsSeries, MetricPoint, AgentBehaviorReport, AgentBehaviorSnapshot
 from app.models.domain import AnalysisRecord, ChangedLine, Finding, ChangeType
 from app.repositories.redis_store import RedisWarehouse
+from app.telemetry import EventSink, NullEventSink
 
 
 WINDOW_PATTERN = re.compile(r"^(?P<value>\d+)(?P<unit>[hdw])$")
@@ -37,8 +38,9 @@ def _now() -> datetime:
 class AnalyticsService:
     """Produces aggregated analytics for reporting and governance."""
 
-    def __init__(self, store: RedisWarehouse) -> None:
+    def __init__(self, store: RedisWarehouse, sink: EventSink | None = None) -> None:
         self._store = store
+        self._sink = sink or NullEventSink()
 
     def index_analysis(
         self,
@@ -46,8 +48,8 @@ class AnalyticsService:
         lines: list[ChangedLine],
         findings: list[Finding],
     ) -> None:
-        # Placeholder for future streaming functionality.
-        return None
+        event = self._build_timeseries_event(record, lines, findings)
+        self._sink.publish(event)
 
     def query_series(
         self,
@@ -111,6 +113,62 @@ class AnalyticsService:
             )
         snapshots.sort(key=lambda snap: snap.agent_id)
         return AgentBehaviorReport(window_start=window_start, window_end=window_end, snapshots=snapshots)
+
+    def _build_timeseries_event(
+        self,
+        record: AnalysisRecord,
+        lines: list[ChangedLine],
+        findings: list[Finding],
+    ) -> dict:
+        timestamp = _now().isoformat()
+        agent_lines: dict[str, list[ChangedLine]] = defaultdict(list)
+        agent_findings: dict[str, list[Finding]] = defaultdict(list)
+        for line in lines:
+            agent_id = line.attribution.agent.agent_id or "unknown"
+            agent_lines[agent_id].append(line)
+        for finding in findings:
+            agent_id = finding.attribution.agent.agent_id or "unknown"
+            agent_findings[agent_id].append(finding)
+
+        agent_payloads: list[dict] = []
+        total_lines = len(lines)
+        total_findings = len(findings)
+        for agent_id, agent_lines_list in agent_lines.items():
+            agent_findings_list = agent_findings.get(agent_id, [])
+            churn_lines = sum(
+                1 for line in agent_lines_list if line.change_type in {ChangeType.MODIFIED, ChangeType.DELETED}
+            )
+            churn_rate = (churn_lines / len(agent_lines_list)) if agent_lines_list else 0.0
+            complexity_values = [self._line_complexity(line) for line in agent_lines_list if (line.content or "").strip()]
+            avg_complexity = (sum(complexity_values) / len(complexity_values)) if complexity_values else 0.0
+            category_counts = defaultdict(int)
+            severity_counts = defaultdict(int)
+            for finding in agent_findings_list:
+                category_counts[finding.category] += 1
+                severity_counts[finding.severity.value] += 1
+            agent_payloads.append(
+                {
+                    "agent_id": agent_id,
+                    "code_volume": len(agent_lines_list),
+                    "churn_lines": churn_lines,
+                    "churn_rate": churn_rate,
+                    "avg_line_complexity": avg_complexity,
+                    "findings_by_category": dict(category_counts),
+                    "findings_by_severity": dict(severity_counts),
+                }
+            )
+
+        agent_payloads.sort(key=lambda payload: payload["agent_id"])
+        return {
+            "event_type": "analysis_metrics",
+            "analysis_id": record.analysis_id,
+            "repo_id": record.repo_id,
+            "pr_number": record.pr_number,
+            "timestamp": timestamp,
+            "total_lines": total_lines,
+            "total_findings": total_findings,
+            "agent_metrics": agent_payloads,
+        }
 
     def _filter_analyses(self, window_start: datetime) -> list[AnalysisRecord]:
         return [
