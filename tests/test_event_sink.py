@@ -82,3 +82,4 @@ def test_file_event_sink_writes_analysis_metrics(tmp_path: Path):
     metrics = event["agent_metrics"][0]
     assert metrics["agent_id"] == "github-copilot"
     assert metrics["findings_by_category"] == {"code_execution": 1}
+    assert metrics["max_line_complexity"] > 0

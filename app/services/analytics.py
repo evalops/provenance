@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import re
@@ -97,9 +98,12 @@ class AnalyticsService:
             churn_rate = (churn_lines / code_volume) if code_volume else 0.0
             complexity_values = [self._line_complexity(line) for line in lines if (line.content or "").strip()]
             avg_complexity = (sum(complexity_values) / len(complexity_values)) if complexity_values else 0.0
+            max_complexity = max(complexity_values) if complexity_values else 0.0
             category_counts = defaultdict(int)
+            severity_counts = defaultdict(int)
             for finding in findings_by_agent.get(agent, []):
                 category_counts[finding.category] += 1
+                severity_counts[finding.severity.value] += 1
             top_categories_map = dict(sorted(category_counts.items(), key=lambda item: item[1], reverse=True)[:top_categories])
             snapshots.append(
                 AgentBehaviorSnapshot(
@@ -108,7 +112,9 @@ class AnalyticsService:
                     churn_lines=churn_lines,
                     churn_rate=churn_rate,
                     avg_line_complexity=avg_complexity,
+                    max_line_complexity=max_complexity,
                     top_vulnerability_categories=top_categories_map,
+                    findings_by_severity=dict(severity_counts),
                 )
             )
         snapshots.sort(key=lambda snap: snap.agent_id)
@@ -153,6 +159,7 @@ class AnalyticsService:
                     "churn_lines": churn_lines,
                     "churn_rate": churn_rate,
                     "avg_line_complexity": avg_complexity,
+                    "max_line_complexity": max(complexity_values) if complexity_values else 0.0,
                     "findings_by_category": dict(category_counts),
                     "findings_by_severity": dict(severity_counts),
                 }
@@ -199,8 +206,23 @@ class AnalyticsService:
 
     @staticmethod
     def _line_complexity(line: ChangedLine) -> int:
-        content = line.content or ""
-        return sum(1 for char in content if not char.isspace())
+        content = (line.content or "").strip()
+        if not content:
+            return 0
+        language = (line.language or "").lower()
+        if language == "python":
+            try:
+                tree = ast.parse(content)
+            except SyntaxError:
+                pass
+            else:
+                node_count = sum(1 for _ in ast.walk(tree))
+                # Weight node count against character length to reflect structural complexity.
+                return max(node_count, len(content))
+        token_complexity = len([token for token in re.split(r"\W+", content) if token])
+        symbol_complexity = sum(1 for char in content if char in "{}[]();,.")
+        operator_complexity = sum(1 for char in content if char in "+-*/%=&|<>!?")
+        return token_complexity + symbol_complexity + operator_complexity
 
     def _compute_code_volume(
         self,

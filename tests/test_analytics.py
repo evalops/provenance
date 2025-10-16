@@ -206,7 +206,10 @@ def test_agent_behavior_report_highlights_top_categories():
     assert claude_snapshot.churn_lines == 2
     assert claude_snapshot.churn_rate == pytest.approx(2 / 3, rel=1e-6)
     assert claude_snapshot.top_vulnerability_categories == {"sqli": 1}
+    assert claude_snapshot.max_line_complexity > 0
+    assert claude_snapshot.findings_by_severity == {"high": 1}
 
     copilot_snapshot = next(s for s in report.snapshots if s.agent_id == "github-copilot")
     assert copilot_snapshot.top_vulnerability_categories == {"code_execution": 2}
     assert copilot_snapshot.avg_line_complexity > 0
+    assert copilot_snapshot.findings_by_severity == {"medium": 2}

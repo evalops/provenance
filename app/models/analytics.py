@@ -41,8 +41,14 @@ class AgentBehaviorSnapshot(BaseModel):
     avg_line_complexity: float = Field(
         description="Heuristic complexity score based on average non-whitespace character count."
     )
+    max_line_complexity: float = Field(
+        description="Maximum heuristic complexity observed for a single line within the window."
+    )
     top_vulnerability_categories: dict[str, int] = Field(
         default_factory=dict, description="Most frequent finding categories."
+    )
+    findings_by_severity: dict[str, int] = Field(
+        default_factory=dict, description="Finding counts bucketed by severity."
     )
 
 
