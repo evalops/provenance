@@ -58,10 +58,12 @@ All settings can be driven by environment variables prefixed with `PROVENANCE_`.
 | `PROVENANCE_PROVENANCE_BLOCK_ON_UNKNOWN` | Block when changed lines lack agent attribution | `false` |
 | `PROVENANCE_RISK_HIGH_SEVERITY_THRESHOLD` | Number of high-severity findings before issuing a warn | `1` |
 | `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` | Default lookback window for analytics | `7d` |
+| `PROVENANCE_SEMGREP_CONFIG_PATH` | Override path/URL for Semgrep configuration | *(bundled rules)* |
 
 ## Detection with Semgrep
 
 - Rules are bundled in `app/detection_rules/semgrep_rules.yml`.
+- Override with your own rule pack by setting `PROVENANCE_SEMGREP_CONFIG_PATH` (file path, directory, or remote Semgrep registry URL).
 - During analysis execution we materialize the changed lines to a temporary workspace and run:
 
   ```bash
@@ -125,7 +127,7 @@ Example ingestion payload:
 # Static checks (Python bytecode compilation)
 uv run -- python -m compileall app
 
-# Run tests once you have a suite in place
+# Run the test suite (uses fakeredis for analytics tests)
 uv run -- pytest
 ```
 

@@ -7,8 +7,9 @@ import subprocess
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Sequence
 
+from app.core.config import settings
 from app.core.identifiers import new_finding_id
 from app.models.domain import (
     AnalysisRecord,
@@ -27,8 +28,15 @@ def _now() -> datetime:
 class DetectionService:
     """Executes configured detectors against changed lines."""
 
-    def __init__(self, detectors: Iterable["BaseDetector"] | None = None) -> None:
-        self._detectors = list(detectors or [SemgrepDetector()])
+    def __init__(
+        self,
+        detectors: Sequence["BaseDetector"] | None = None,
+        semgrep_config_path: str | Path | None = None,
+    ) -> None:
+        if detectors is None:
+            config_override = semgrep_config_path or settings.semgrep_config_path
+            detectors = [SemgrepDetector(config_path=config_override)]
+        self._detectors = list(detectors)
 
     def run(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         findings: list[Finding] = []
@@ -84,6 +92,7 @@ class SemgrepDetector(BaseDetector):
     CATEGORY_MAP = {
         "sql-injection-concat": "sqli",
         "dangerous-eval": "code_execution",
+        "dangerous-exec": "code_execution",
     }
     SEVERITY_MAP = {
         "ERROR": SeverityLevel.HIGH,
@@ -92,7 +101,10 @@ class SemgrepDetector(BaseDetector):
     }
 
     def __init__(self, config_path: str | Path | None = None) -> None:
-        self.config_path = Path(config_path) if config_path else self.CONFIG_PATH
+        if config_path:
+            self.config_path = Path(config_path).expanduser()
+        else:
+            self.config_path = self.CONFIG_PATH
 
     def execute(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         filtered_lines = [line for line in lines if line.change_type != ChangeType.DELETED]
@@ -100,8 +112,10 @@ class SemgrepDetector(BaseDetector):
             return []
 
         line_map: dict[tuple[str, int], ChangedLine] = {}
+        workspace_root: Path | None = None
         with TemporaryWorkspace(filtered_lines) as workspace:
             line_map = workspace.line_map
+            workspace_root = workspace.root
             cmd = [
                 "semgrep",
                 "--json",
@@ -127,14 +141,27 @@ class SemgrepDetector(BaseDetector):
             line_number = start.get("line")
             if not rel_path or not line_number:
                 continue
-            key = (rel_path, line_number)
-            changed_line = line_map.get(key)
+            candidate_paths = []
+            result_path = Path(rel_path)
+            if workspace_root:
+                try:
+                    relative = result_path.relative_to(workspace_root)
+                    candidate_paths.append(relative.as_posix())
+                except ValueError:
+                    pass
+            candidate_paths.append(result_path.as_posix())
+            changed_line = None
+            for path_key in candidate_paths:
+                changed_line = line_map.get((path_key, line_number))
+                if changed_line:
+                    break
             if not changed_line:
                 continue
-            severity = self.SEVERITY_MAP.get(match.get("extra", {}).get("severity", "").upper(), SeverityLevel.LOW)
-            message = match.get("extra", {}).get("message") or match.get("extra", {}).get("metadata", {}).get(
-                "message", ""
-            )
+            extra = match.get("extra", {}) or {}
+            severity = self.SEVERITY_MAP.get(extra.get("severity", "").upper(), SeverityLevel.LOW)
+            message = extra.get("message") or extra.get("metadata", {}).get("message", "")
+            raw_rule_id = match.get("check_id", self.rule_key)
+            rule_id = raw_rule_id.rsplit(".", 1)[-1]
             findings.append(
                 Finding(
                     finding_id=new_finding_id(),
@@ -143,9 +170,9 @@ class SemgrepDetector(BaseDetector):
                     pr_number=record.pr_number,
                     file_path=changed_line.file_path,
                     line_number=changed_line.line_number,
-                    rule_key=match.get("check_id", self.rule_key),
-                    rule_version=match.get("extra", {}).get("metadata", {}).get("version", "1.0.0"),
-                    category=self.CATEGORY_MAP.get(match.get("check_id"), self.category),
+                    rule_key=rule_id,
+                    rule_version=extra.get("metadata", {}).get("version", "1.0.0"),
+                    category=self.CATEGORY_MAP.get(rule_id, self.category),
                     severity=severity,
                     engine_name=self.name,
                     message=message or "Semgrep finding",

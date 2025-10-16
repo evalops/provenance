@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     analytics_default_window: str = "7d"
     service_base_url: str = "http://localhost:8000"
     redis_url: str = "redis://localhost:6379/0"
+    semgrep_config_path: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

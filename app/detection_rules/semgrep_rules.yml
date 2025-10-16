@@ -12,12 +12,19 @@ rules:
     pattern-regex: "(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE).*(\\+|\\%|format\\()"
 
   - id: dangerous-eval
-    message: "Use of eval/exec detected; consider safer alternatives."
+    message: "Use of eval detected; consider safer alternatives."
     severity: WARNING
     languages:
       - python
       - javascript
       - typescript
-    pattern-either:
-      - pattern: eval(...)
-      - pattern: exec(...)
+    pattern-regex: "\\beval\\s*\\("
+
+  - id: dangerous-exec
+    message: "Use of exec detected; consider safer alternatives."
+    severity: WARNING
+    languages:
+      - python
+      - javascript
+      - typescript
+    pattern-regex: "\\bexec\\s*\\("
