@@ -104,6 +104,10 @@ def main() -> None:
     analysis_id = response["analysis_id"]
     decision = poll_decision(args.api_url, args.api_token, analysis_id)
     print(json.dumps(decision, indent=2))
+    decision_info = decision.get("decision") or {}
+    outcome_value = decision_info.get("outcome") or decision.get("status")
+    if isinstance(outcome_value, str) and outcome_value.lower() == "block":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

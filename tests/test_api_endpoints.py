@@ -99,6 +99,7 @@ def test_full_analysis_flow_via_api():
     body = status_resp.json()
     assert body["findings_total"] == 1
     assert body["risk_summary"]["findings_by_category"] == {"code_execution": 1}
+    assert body["decision"]["outcome"] == "allow"
 
     summary = client.get("/v1/analytics/summary", params={"time_window": "1d", "metric": "code_volume"})
     assert summary.status_code == 200
@@ -119,3 +120,9 @@ def test_full_analysis_flow_via_api():
     bundle_json = bundle_resp.json()
     assert bundle_json["analysis_id"] == analysis_id
     assert bundle_json["bundle"]["payloadType"] == "application/provenance.decision+json"
+
+    sarif_resp = client.get(f"/v1/analysis/{analysis_id}/sarif")
+    assert sarif_resp.status_code == 200
+    sarif_json = sarif_resp.json()
+    assert sarif_json["version"] == "2.1.0"
+    assert sarif_json["runs"]

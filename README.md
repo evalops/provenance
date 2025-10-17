@@ -123,6 +123,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `/v1/analysis/{id}` | `GET` | Poll analysis status, findings count, and risk summary snapshot |
 | `/v1/analysis/{id}/decision` | `GET` | Fetch the governance decision (allow/block/warn) with evidence |
 | `/v1/analysis/{id}/bundle` | `GET` | Retrieve the signed DSSE decision bundle |
+| `/v1/analysis/{id}/sarif` | `GET` | Retrieve the SARIF 2.1.0 findings report for the analysis |
 | `/v1/analytics/summary` | `GET` | Retrieve aggregated KPIs (risk rate, provenance, volume, churn, complexity, etc.) |
 | `/v1/analytics/agents/behavior` | `GET` | Retrieve composite behavioral snapshots for each agent |
 | `/v1/detectors/capabilities` | `GET` | Enumerate active detectors (Semgrep configs, versions, metadata) |
@@ -179,6 +180,13 @@ To smoke-test the GitHub resolver end-to-end:
 4. Inspect the resulting `analysis` record and `/v1/analytics/summary` output to confirm review/CI signals flowed through.
 
 The same process works against forks or sandboxes—helpful when validating new heuristics without polluting production repositories.
+
+## CI Integration
+
+- A composite GitHub Action is bundled at `clients/github-action/`. Reference it from `.github/workflows/provenance.yml` and pass `api_url` + `api_token` secrets to submit each pull request diff. The action fails automatically when the governance outcome is `block`.
+- The workflow helper collects the PR diff (`base_sha..head_sha`), submits it to `/v1/analysis`, polls `/v1/analysis/{id}`, and prints the enriched decision payload so reviewers can inspect risk summaries inline.
+- Consume `/v1/analysis/{id}/sarif` when you need static-analysis interoperability (e.g., uploading to GitHub code scanning or aggregating findings in other dashboards).
+- Surface decision bundles in CI by hitting `/v1/analysis/{id}/bundle` (e.g., attach the DSSE envelope as a build artifact) to preserve signed provenance for downstream policy checks.
 
 ## Telemetry Export
 

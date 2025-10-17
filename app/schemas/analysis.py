@@ -83,6 +83,7 @@ class AnalysisStatusResponse(BaseModel):
     updated_at: datetime
     findings_total: int
     risk_summary: dict = Field(default_factory=dict)
+    decision: dict | None = None
 
 
 class DecisionBundleResponse(BaseModel):
