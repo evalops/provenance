@@ -152,6 +152,17 @@ Example ingestion payload:
 - Review-focused metrics (`review_comments`, `unique_reviewers`, `review_events`, `agent_comment_mentions`) continue to leverage GitHub PR data when credentials are supplied; classification metrics reflect the resolver's heuristic labeling of each conversation snippet.
 - Use `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` or query parameters such as `?time_window=14d` to track longer horizons and compare agents.
 
+### Dry-Running the GitHub Resolver
+
+To smoke-test the GitHub resolver end-to-end:
+
+1. Export `PROVENANCE_GITHUB_TOKEN` with repo-scoped access.
+2. Create a throwaway branch and open a PR against `main`; include a commit trailer such as `Agent-ID: test-agent`.
+3. POST a synthetic analysis payload pointing at that PR (`repo`, `pr_number`, `head_sha`) so the resolver can hydrate metadata.
+4. Inspect the resulting `analysis` record and `/v1/analytics/summary` output to confirm review/CI signals flowed through.
+
+The same process works against forks or sandboxes—helpful when validating new heuristics without polluting production repositories.
+
 ## Telemetry Export
 
 - Each analysis generates an `analysis_metrics` event written to `data/timeseries_events.jsonl` by default.
