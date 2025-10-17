@@ -71,4 +71,11 @@ def get_analysis_service() -> AnalysisService:
     analytics = get_analytics_service()
     governance = get_governance_service()
     github_resolver = get_github_resolver()
-    return AnalysisService(store, detection, governance, analytics, github_resolver)
+    return AnalysisService(
+        store,
+        detection,
+        governance,
+        analytics,
+        github_resolver=github_resolver,
+        agent_public_keys=settings.agent_public_keys,
+    )

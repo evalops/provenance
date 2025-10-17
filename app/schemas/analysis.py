@@ -34,6 +34,13 @@ class ChangedLinePayload(BaseModel):
     author_identity: Optional[str] = None
     timestamp: Optional[datetime] = None
     attribution: AttributionPayload
+    content_sha256: Optional[str] = Field(
+        None, description="Optional hex-encoded SHA256 of the line content supplied by the client."
+    )
+    attestation_signature: Optional[str] = Field(
+        None,
+        description="Optional base64-encoded Ed25519 signature over the content SHA256 from the agent runtime.",
+    )
 
 
 class ProvenanceDataPayload(BaseModel):

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import base64
+import binascii
 import json
 import time
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from fastapi import BackgroundTasks
@@ -25,6 +28,9 @@ from app.services.detection import DetectionService
 from app.services.governance import GovernanceService
 from app.telemetry import increment_analysis_ingestion, record_analysis_duration, record_analysis_findings
 
+from nacl.signing import VerifyKey
+from nacl.exceptions import BadSignatureError
+
 if TYPE_CHECKING:
     from app.provenance.github_resolver import GitHubProvenanceResolver
 
@@ -43,12 +49,15 @@ class AnalysisService:
         governance_service: GovernanceService,
         analytics_service: AnalyticsService,
         github_resolver: "GitHubProvenanceResolver | None" = None,
+        agent_public_keys: dict[str, str] | None = None,
     ) -> None:
         self._store = store
         self._detection = detection_service
         self._governance = governance_service
         self._analytics = analytics_service
         self._github_resolver = github_resolver
+        self._agent_public_keys = {k.lower(): v for k, v in (agent_public_keys or {}).items()}
+        self._verify_key_cache: dict[str, VerifyKey] = {}
 
     def ingest_analysis(
         self,
@@ -98,6 +107,10 @@ class AnalysisService:
         ]
         if lines:
             self._store.add_changed_lines(analysis_id, lines)
+            avg_conf = self._average_confidence(lines)
+            if avg_conf is not None:
+                record.provenance_inputs["provenance_confidence"] = avg_conf
+                self._store.update_analysis(record)
         record.status = AnalysisStatus.IN_PROGRESS
         record.updated_at = _now()
         self._store.update_analysis(record)
@@ -155,6 +168,7 @@ class AnalysisService:
             commit_sha=payload.attribution.commit_sha,
             provenance_marker=payload.attribution.provenance_marker,
         )
+        resolved_via_resolver = False
         if not attribution.agent.agent_id:
             agent_id, session_id, evidence = self._resolve_agent(
                 repo=request.repo,
@@ -167,6 +181,26 @@ class AnalysisService:
                 attribution.agent_session_id = session_id
             if evidence:
                 attribution.provenance_marker = json.dumps(evidence)
+            resolved_via_resolver = True
+
+        content_sha = payload.content_sha256
+        if payload.content:
+            computed_sha = self._hash_content(payload.content)
+            if content_sha and content_sha.lower() != computed_sha:
+                raise ValueError("Provided content_sha256 does not match content")
+            content_sha = computed_sha
+        if payload.attestation_signature and not content_sha:
+            raise ValueError("attestation_signature provided without content SHA")
+
+        confidence = self._derive_confidence(
+            agent_id=attribution.agent.agent_id,
+            content_sha=content_sha,
+            signature=payload.attestation_signature,
+            resolved_via_resolver=resolved_via_resolver,
+        )
+        if confidence is not None:
+            attribution.confidence_score = confidence
+
         return ChangedLine(
             analysis_id=analysis_id,
             repo_id=request.repo,
@@ -180,6 +214,8 @@ class AnalysisService:
             author_identity=payload.author_identity,
             language=payload.language,
             content=payload.content,
+            content_sha256=content_sha,
+            attestation_signature=payload.attestation_signature,
             attribution=attribution,
         )
 
@@ -193,6 +229,62 @@ class AnalysisService:
         if not self._github_resolver:
             return None, None, {}
         return self._github_resolver.resolve_agent(repo, pr_number, commit_sha)
+
+    @staticmethod
+    def _hash_content(content: str) -> str:
+        return sha256(content.encode("utf-8")).hexdigest()
+
+    def _derive_confidence(
+        self,
+        *,
+        agent_id: str,
+        content_sha: str | None,
+        signature: str | None,
+        resolved_via_resolver: bool,
+    ) -> float | None:
+        agent_key_known = self._has_public_key(agent_id)
+        if signature and content_sha:
+            success, reason = self._verify_attestation(agent_id, content_sha, signature)
+            if success:
+                return 1.0
+            if reason == "missing_key":
+                return 0.4
+            return 0.0
+        if signature and not content_sha:
+            return 0.0
+        if agent_key_known and not signature:
+            return 0.2
+        if agent_id:
+            return 0.6 if resolved_via_resolver else 0.5
+        return 0.0
+
+    def _has_public_key(self, agent_id: str | None) -> bool:
+        if not agent_id:
+            return False
+        return agent_id.lower() in self._agent_public_keys
+
+    def _verify_attestation(self, agent_id: str | None, content_sha: str, signature: str) -> tuple[bool, str | None]:
+        if not agent_id:
+            return False, "missing_agent"
+        key_str = self._agent_public_keys.get(agent_id.lower())
+        if not key_str:
+            return False, "missing_key"
+        try:
+            verify_key = self._verify_key_cache.get(agent_id.lower())
+            if not verify_key:
+                verify_key = VerifyKey(base64.b64decode(key_str))
+                self._verify_key_cache[agent_id.lower()] = verify_key
+            verify_key.verify(content_sha.encode("utf-8"), base64.b64decode(signature))
+            return True, None
+        except (BadSignatureError, ValueError, binascii.Error):
+            return False, "invalid_signature"
+
+    @staticmethod
+    def _average_confidence(lines: list[ChangedLine]) -> float | None:
+        scores = [line.attribution.confidence_score for line in lines if line.attribution.confidence_score is not None]
+        if not scores:
+            return None
+        return sum(scores) / len(scores)
 
     def list_findings(self, analysis_id: str) -> list[Finding]:
         return self._store.list_findings(analysis_id)

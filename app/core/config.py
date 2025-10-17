@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     github_cache_ttl_seconds: int = 300
     github_agent_map: dict[str, str] = Field(default_factory=dict)
     github_reviewer_team_map: dict[str, str] = Field(default_factory=dict)
+    github_team_review_budgets: dict[str, int] = Field(default_factory=dict)
+    agent_public_keys: dict[str, str] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

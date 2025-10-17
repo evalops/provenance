@@ -65,6 +65,12 @@ class ProvenanceAttribution(BaseModel):
         None,
         description="Raw provenance marker string (commit trailer, PR metadata, etc.) for traceability.",
     )
+    confidence_score: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Heuristic confidence score (0-1) indicating strength of attribution evidence.",
+    )
 
 
 class ChangedLine(BaseModel):
@@ -84,6 +90,13 @@ class ChangedLine(BaseModel):
     content: Optional[str] = Field(
         None,
         description="Optional snippet of the changed line for evidence; may be omitted depending on retention policy.",
+    )
+    content_sha256: Optional[str] = Field(
+        None, description="Hex-encoded SHA256 of the line content used for attestation verification."
+    )
+    attestation_signature: Optional[str] = Field(
+        None,
+        description="Base64-encoded Ed25519 signature over the content hash supplied by the agent runtime.",
     )
     attribution: ProvenanceAttribution
 

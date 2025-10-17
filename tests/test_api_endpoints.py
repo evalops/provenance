@@ -36,8 +36,8 @@ def _build_test_client() -> TestClient:
     sink = NullEventSink()
     detection = DetectionService()
     analytics = AnalyticsService(store, sink=sink)
-    governance = GovernanceService()
-    analysis = AnalysisService(store, detection, governance, analytics)
+    governance = GovernanceService(sink)
+    analysis = AnalysisService(store, detection, governance, analytics, agent_public_keys={})
 
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_detection_service] = lambda: detection

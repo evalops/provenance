@@ -85,6 +85,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_AGENT_MAP` | JSON map of GitHub logins/keywords to agent IDs | `{}` |
 | `PROVENANCE_GITHUB_REVIEWER_TEAM_MAP` | JSON map of reviewer logins to team names for cohort reporting | `{}` |
 | `PROVENANCE_TEAM_REVIEW_BUDGETS` | JSON map of team names to max expected human review counts per window | `{}` |
+| `PROVENANCE_AGENT_PUBLIC_KEYS` | JSON map of agent IDs to base64 Ed25519 public keys for attestation verification | `{}` |
 
 ## Detection Pipeline
 
@@ -106,6 +107,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - When GitHub credentials are configured, the service inspects commit trailers, PR labels, review comments, reviewer identities/teams, and PR timelines to fill missing agent attribution (see `app/provenance/github_resolver.py`).
 - The resolver persists review conversations (thread counts, team participation, bot override details, classification breakdowns, response latency), CI outcomes (time-to-green, failing check taxonomy), and commit/timeline summaries (force pushes, human follow-ups, rewrite loops) so analytics/governance can act without re-crawling GitHub.
 - Governance automatically raises alerts when bot change requests are bypassed or force-pushes land after approval; `/v1/analytics/review-alerts` and `/v1/analytics/review-load` expose the same signals for monitoring.
+- Agents can optionally attach Ed25519 signatures for each changed line. Supply public keys via `PROVENANCE_AGENT_PUBLIC_KEYS`; verified signatures boost provenance confidence and surface cryptographic evidence alongside heuristic attribution.
 
 ## API Surface
 
