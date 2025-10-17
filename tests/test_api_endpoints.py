@@ -113,3 +113,9 @@ def test_full_analysis_flow_via_api():
     snapshot = snapshots[0]
     assert snapshot["agent_id"] == "github-copilot"
     assert snapshot["findings_by_severity"] == {"medium": 1}
+
+    bundle_resp = client.get(f"/v1/analysis/{analysis_id}/bundle")
+    assert bundle_resp.status_code == 200
+    bundle_json = bundle_resp.json()
+    assert bundle_json["analysis_id"] == analysis_id
+    assert bundle_json["bundle"]["payloadType"] == "application/provenance.decision+json"

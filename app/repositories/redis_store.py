@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
@@ -88,6 +89,17 @@ class RedisWarehouse:
             return None
         return PolicyDecision.model_validate_json(data)
 
+    def store_decision_bundle(self, analysis_id: str, bundle: dict) -> None:
+        key = self._bundle_key(analysis_id)
+        self._client.set(key, json.dumps(bundle, separators=(",", ":")))
+
+    def get_decision_bundle(self, analysis_id: str) -> Optional[dict]:
+        key = self._bundle_key(analysis_id)
+        data = self._client.get(key)
+        if not data:
+            return None
+        return json.loads(data)
+
     def update_analysis_status(
         self,
         analysis_id: str,
@@ -117,3 +129,7 @@ class RedisWarehouse:
     @staticmethod
     def _decision_key(analysis_id: str) -> str:
         return f"analysis:{analysis_id}:decision"
+
+    @staticmethod
+    def _bundle_key(analysis_id: str) -> str:
+        return f"analysis:{analysis_id}:decision_bundle"

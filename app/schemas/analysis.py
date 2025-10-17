@@ -83,3 +83,11 @@ class AnalysisStatusResponse(BaseModel):
     updated_at: datetime
     findings_total: int
     risk_summary: dict = Field(default_factory=dict)
+
+
+class DecisionBundleResponse(BaseModel):
+    """Response payload for /v1/analysis/{id}/bundle."""
+
+    analysis_id: str
+    bundle: dict
+    request_id: str

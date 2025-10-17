@@ -80,8 +80,9 @@ def test_high_severity_triggers_warn(monkeypatch):
         attribution=line.attribution,
     )
 
-    decision = service.evaluate(record, [line], [finding])
+    decision, bundle = service.evaluate(record, [line], [finding])
     assert decision.outcome.value == "warn"
+    assert bundle["payloadType"] == "application/provenance.decision+json"
 
 
 def test_critical_triggers_block(monkeypatch):
@@ -121,7 +122,7 @@ def test_critical_triggers_block(monkeypatch):
         attribution=line.attribution,
     )
 
-    decision = service.evaluate(record, [line], [finding])
+    decision, _ = service.evaluate(record, [line], [finding])
     assert decision.outcome.value == "block"
 
 
@@ -145,7 +146,7 @@ def test_unknown_provenance_blocks_when_enabled(monkeypatch):
         attribution=ProvenanceAttribution(agent=AgentIdentity(agent_id="")),
     )
 
-    decision = service.evaluate(record, [line], [])
+    decision, _ = service.evaluate(record, [line], [])
     assert decision.outcome.value == "block"
 
 
@@ -192,10 +193,10 @@ def test_category_thresholds_override(monkeypatch):
         for idx in range(2)
     ]
 
-    decision = service.evaluate(record, [line], findings[:1])
+    decision, _ = service.evaluate(record, [line], findings[:1])
     assert decision.outcome.value == "warn"
 
-    decision_block = service.evaluate(record, [line], findings)
+    decision_block, _ = service.evaluate(record, [line], findings)
     assert decision_block.outcome.value == "block"
 
 
@@ -217,14 +218,16 @@ def test_bot_override_triggers_warn(monkeypatch):
         }
     }
 
-    decision = service.evaluate(record, [], [])
+    decision, bundle = service.evaluate(record, [], [])
     assert decision.outcome.value == "warn"
     assert decision.risk_summary["bot_block_overrides"] == 2
     assert decision.risk_summary["bot_block_resolved"] == 1
     assert sink.events
-    alert = sink.events[-1]
-    assert alert["event_type"] == "review_override_alert"
-    assert alert["overrides"] == 2
+    override_alert = next(event for event in sink.events if event["event_type"] == "review_override_alert")
+    assert override_alert["overrides"] == 2
+    bundle_event = next(event for event in sink.events if event["event_type"] == "decision_bundle")
+    assert bundle_event["analysis_id"] == record.analysis_id
+    assert "payloadSha256" in bundle
 
 
 def test_bot_override_blocks_when_policy_enabled(monkeypatch):
@@ -244,7 +247,7 @@ def test_bot_override_blocks_when_policy_enabled(monkeypatch):
         }
     }
 
-    decision = service.evaluate(record, [], [])
+    decision, _ = service.evaluate(record, [], [])
     assert decision.outcome.value == "block"
     assert decision.risk_summary["force_push_after_approval"] is True
     assert sink.events

@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     clickhouse_database: str | None = None
     clickhouse_user: str | None = None
     clickhouse_password: str | None = None
+    decision_signing_key: str | None = Field(
+        default=None,
+        description="Base64-encoded Ed25519 private key used to sign decision bundles.",
+    )
+    decision_key_id: str | None = Field(
+        default=None,
+        description="Key identifier embedded in decision bundle signatures.",
+    )
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

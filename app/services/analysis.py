@@ -67,6 +67,7 @@ class AnalysisService:
         analysis_id = new_analysis_id()
         timestamp = _now()
         provenance_inputs = request.provenance_data.model_dump()
+        provenance_inputs["detector_capabilities"] = self._detection.list_capabilities()
 
         github_summary_added = False
         if self._github_resolver and request.pr_number:
@@ -137,8 +138,9 @@ class AnalysisService:
                 self._store.add_findings(analysis_id, findings)
 
             self._analytics.index_analysis(record, lines, findings)
-            decision = self._governance.evaluate(record, lines, findings)
+            decision, bundle = self._governance.evaluate(record, lines, findings)
             self._store.upsert_policy_decision(decision)
+            self._store.store_decision_bundle(analysis_id, bundle)
 
             record.status = AnalysisStatus.COMPLETED
             record.updated_at = _now()

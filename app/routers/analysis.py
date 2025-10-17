@@ -11,6 +11,7 @@ from app.schemas.analysis import (
     AnalysisIngestionRequest,
     AnalysisIngestionResponse,
     AnalysisStatusResponse,
+    DecisionBundleResponse,
 )
 from app.services.analysis import AnalysisService
 
@@ -51,4 +52,19 @@ def get_analysis_status(
         updated_at=record.updated_at,
         findings_total=findings_total,
         risk_summary=risk_summary,
+    )
+
+
+@router.get("/{analysis_id}/bundle", response_model=DecisionBundleResponse)
+def get_decision_bundle(
+    analysis_id: str,
+    store: RedisWarehouse = Depends(get_store),
+) -> DecisionBundleResponse:
+    bundle = store.get_decision_bundle(analysis_id)
+    if not bundle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Decision bundle not found")
+    return DecisionBundleResponse(
+        analysis_id=analysis_id,
+        bundle=bundle,
+        request_id=f"rq_{settings.default_policy_version}-{analysis_id}",
     )

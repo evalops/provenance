@@ -5,6 +5,20 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
+import base64
+import binascii
+import json
+from hashlib import sha256
+
+from nacl.signing import SigningKey
+
+import base64
+import binascii
+import json
+from hashlib import sha256
+
+from nacl.signing import SigningKey
+
 from app.core.config import settings
 from app.core.identifiers import new_decision_id
 from app.telemetry import EventSink, NullEventSink
@@ -27,13 +41,20 @@ class GovernanceService:
 
     def __init__(self, sink: EventSink | None = None) -> None:
         self._sink = sink or NullEventSink()
+        self._signing_key: SigningKey | None = None
+        if settings.decision_signing_key:
+            try:
+                key_bytes = base64.b64decode(settings.decision_signing_key)
+                self._signing_key = SigningKey(key_bytes)
+            except (binascii.Error, ValueError):  # type: ignore[name-defined]
+                self._signing_key = None
 
     def evaluate(
         self,
         record: AnalysisRecord,
         lines: list[ChangedLine],
         findings: list[Finding],
-    ) -> PolicyDecision:
+    ) -> tuple[PolicyDecision, dict]:
         coverage = self._calculate_provenance_coverage(lines)
         findings_summary = self._summarise_findings(findings)
 
@@ -110,7 +131,7 @@ class GovernanceService:
                 force_push=bool(force_push_after_approval),
             )
 
-        return PolicyDecision(
+        decision = PolicyDecision(
             decision_id=new_decision_id(),
             analysis_id=record.analysis_id,
             repo_id=record.repo_id,
@@ -123,6 +144,14 @@ class GovernanceService:
             policy_version=settings.default_policy_version,
             evidence_links=evidence_links,
         )
+        bundle = self._build_decision_bundle(
+            record=record,
+            lines=lines,
+            findings=findings,
+            decision=decision,
+        )
+        self._emit_decision_event(record.analysis_id, bundle)
+        return decision, bundle
 
     @staticmethod
     def _calculate_provenance_coverage(lines: list[ChangedLine]) -> dict:
@@ -173,4 +202,66 @@ class GovernanceService:
         try:
             self._sink.publish(event)
         except Exception:  # pragma: no cover - telemetry should not break decision flow
+            pass
+
+    def _build_decision_bundle(
+        self,
+        *,
+        record: AnalysisRecord,
+        lines: list[ChangedLine],
+        findings: list[Finding],
+        decision: PolicyDecision,
+    ) -> dict:
+        payload_body = {
+            "analysis_id": record.analysis_id,
+            "repo_id": record.repo_id,
+            "pr_number": record.pr_number,
+            "decided_at": decision.decided_at.isoformat(),
+            "outcome": decision.outcome.value,
+            "policy_version": decision.policy_version,
+            "rationale": decision.rationale,
+            "risk_summary": decision.risk_summary,
+            "provenance_confidence": record.provenance_inputs.get("provenance_confidence"),
+            "thresholds": {
+                "warn": settings.policy_warn_thresholds,
+                "block": settings.policy_block_thresholds,
+            },
+            "detector_capabilities": record.provenance_inputs.get("detector_capabilities"),
+            "line_count": len(lines),
+            "finding_count": len(findings),
+            "inputs_sha256": sha256(
+                json.dumps(record.provenance_inputs, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        }
+        canonical = json.dumps(payload_body, sort_keys=True, separators=(",", ":"))
+        payload_bytes = canonical.encode("utf-8")
+        payload_b64 = base64.b64encode(payload_bytes).decode()
+        sha_digest = sha256(payload_bytes).hexdigest()
+        envelope = {
+            "payloadType": "application/provenance.decision+json",
+            "payload": payload_b64,
+            "payloadSha256": sha_digest,
+            "signatures": [],
+        }
+        if self._signing_key is not None:
+            signature = self._signing_key.sign(payload_bytes).signature
+            envelope["signatures"].append(
+                {
+                    "keyid": settings.decision_key_id or "decision-key",
+                    "sig": base64.b64encode(signature).decode(),
+                }
+            )
+        return envelope
+
+    def _emit_decision_event(self, analysis_id: str, bundle: dict) -> None:
+        try:
+            self._sink.publish(
+                {
+                    "event_type": "decision_bundle",
+                    "analysis_id": analysis_id,
+                    "payload": bundle,
+                    "timestamp": _now().isoformat(),
+                }
+            )
+        except Exception:  # pragma: no cover
             pass
