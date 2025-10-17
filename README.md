@@ -11,7 +11,6 @@ Modern teams mix human and AI-generated code. This service makes that blend obse
 - **Analytics** – Produce KPIs such as agent-level risk rate, provenance coverage, volume/churn, and trend deltas.
 - **Governance** – Expose policy decisions (allow/block/warn) with evidence that maps back to repos, PRs, files, and lines.
 
-The codebase adheres to the requirements in `Provenance & Risk Analytics service` specification.
 
 ## Architecture In Brief
 
