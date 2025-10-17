@@ -36,6 +36,9 @@ Common overrides:
 | `ingress.*` | Ingress configuration (class, hosts, TLS) | Disabled |
 | `redis.enabled` | Deploy bundled Redis | `true` |
 | `redis.persistence.enabled` | Provision PVC for Redis data | `false` |
+| `serviceMonitor.enabled` | Emit a ServiceMonitor for Prometheus Operator | `false` |
+| `pdb.enabled` | Create PodDisruptionBudget for API pods | `false` |
+| `networkPolicy.enabled` | Restrict pod ingress/egress with NetworkPolicy | `false` |
 
 See [`values.yaml`](values.yaml) for the full catalog (node selectors, tolerations, OTEL knobs, extra volumes, etc.).
 
@@ -44,3 +47,26 @@ See [`values.yaml`](values.yaml) for the full catalog (node selectors, toleratio
 - When enabling Redis persistence, ensure an appropriate storage class exists.
 - Provide signing keys and API tokens via `extraEnvFrom` referencing Kubernetes Secrets.
 - Enable autoscaling by toggling `autoscaling.enabled` and configuring min/max replicas and CPU utilization targets.
+
+## Packaging & Publishing
+
+Package the chart locally:
+
+```bash
+make helm-package
+# outputs dist/charts/provenance-<version>.tgz
+```
+
+To publish via GitHub Pages or an OCI registry:
+
+```bash
+helm package charts/provenance --destination dist/charts
+helm repo index dist/charts --url https://example.com/charts
+```
+
+Or push to an OCI registry:
+
+```bash
+helm package charts/provenance
+helm push provenance-<version>.tgz oci://ghcr.io/your-org/charts
+```

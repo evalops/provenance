@@ -1,4 +1,5 @@
 .PHONY: setup test compile run docs dashboard clickhouse-up
+.PHONY: helm-lint helm-template helm-package
 
 setup:
 	uv sync --all-extras
@@ -22,3 +23,13 @@ clickhouse-up:
 	docker run --rm -p 8123:8123 -p 9000:9000 \
 		-v $(PWD)/infrastructure/clickhouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql \
 		clickhouse/clickhouse-server:latest
+
+helm-lint:
+	helm lint charts/provenance
+
+helm-template:
+	helm template provenance charts/provenance
+
+helm-package:
+	mkdir -p dist/charts
+	helm package charts/provenance --destination dist/charts

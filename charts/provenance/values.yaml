@@ -94,3 +94,35 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  annotations: {}
+  interval: 30s
+  scrapeTimeout: ""
+  path: /metrics
+  scheme: http
+  tlsConfig: {}
+  metricRelabelings: []
+  relabelings: []
+
+pdb:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - {}

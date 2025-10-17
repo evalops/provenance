@@ -129,6 +129,13 @@ spec:
 - Expose the API via an ingress controller (NGINX, Traefik, ALB).
 - Terminate TLS at the ingress or use a service mesh (Linkerd, Istio). Ensure `PROVENANCE_SERVICE_BASE_URL` matches the external HTTPS endpoint.
 
+### Helm Packaging & Release
+
+- Run `make helm-lint` and `make helm-template` (or rely on CI) before cutting releases.
+- Package the chart with `make helm-package`; artifacts land in `dist/charts/provenance-<version>.tgz`.
+- Publish to GitHub Pages (`helm repo index dist/charts --url ...`) or push to an OCI registry (`helm push provenance-<version>.tgz oci://ghcr.io/<org>/charts`).
+- Remember to bump `charts/provenance/Chart.yaml` when chart features change.
+
 ## Scaling Considerations
 
 - **Detector Throughput** – Detector execution happens synchronously per request. Increase pod count to parallelize analyses, or shard workflows by repo/team. Monitoring request latency via Prometheus helps identify bottlenecks.
