@@ -66,6 +66,10 @@ class AgentBehaviorSnapshot(BaseModel):
     classification_breakdown: dict[str, int] = Field(
         default_factory=dict, description="Aggregate comment/review classifications (security, nit, etc.)."
     )
+    human_reviewer_count: int = Field(0, description="Count of human reviewers engaged across PRs in the window.")
+    reviewer_association_breakdown: dict[str, int] = Field(
+        default_factory=dict, description="Reviewer participation by GitHub association (member, contributor, etc.)."
+    )
     ci_run_count: int = Field(0, description="Number of CI runs/checks evaluated.")
     ci_failure_count: int = Field(0, description="Number of failing CI runs/checks.")
     ci_failed_checks: int = Field(0, description="Unique failing CI checks in the window.")
@@ -74,8 +78,20 @@ class AgentBehaviorSnapshot(BaseModel):
     force_push_events: int = Field(0, description="Force-push events recorded on associated PRs.")
     rewrite_loops: int = Field(0, description="Follow-up human commits arriving within 48h of agent commits.")
     human_followup_commits: int = Field(0, description="Count of human commits landing immediately after agent commits.")
+    human_followup_commits_fast: int = Field(
+        0, description="Human follow-up commits landing within 1 hour of an agent commit."
+    )
     agent_commit_ratio: float = Field(0.0, description="Share of commits authored by the agent.")
     commit_lead_time_hours: Optional[float] = Field(None, description="Lead time between earliest and latest commits.")
+    force_push_after_approval_count: int = Field(
+        0, description="Number of analyses where a force-push occurred after approval."
+    )
+    ci_failed_check_names: dict[str, int] = Field(
+        default_factory=dict, description="Counts of failing CI check names across the window."
+    )
+    ci_failure_contexts: dict[str, int] = Field(
+        default_factory=dict, description="Counts of failing status contexts across the window."
+    )
     top_paths: dict[str, int] = Field(
         default_factory=dict, description="Most frequently modified top-level paths for the agent."
     )

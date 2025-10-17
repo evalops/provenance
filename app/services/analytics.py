@@ -87,10 +87,16 @@ class AnalyticsService:
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="review_comment_count", unit="count")
         if metric == "unique_reviewers":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="unique_reviewers", unit="count")
+        if metric == "avg_unique_reviewers":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="unique_reviewers", unit="count", mode="average")
         if metric == "review_events":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="review_events", unit="count")
         if metric == "agent_comment_mentions":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_comment_mentions", unit="count")
+        if metric == "human_reviewer_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="human_reviewer_count", unit="count")
+        if metric == "avg_human_reviewers":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="human_reviewer_count", unit="count", mode="average")
         if metric == "ci_failure_count":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="ci_failure_count", unit="count")
         if metric == "ci_run_count":
@@ -117,6 +123,10 @@ class AnalyticsService:
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="rewrite_loops", unit="count")
         if metric == "human_followup_commits":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="human_followup_commits", unit="count")
+        if metric == "human_followup_fast":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="human_followup_commits_fast", unit="count")
+        if metric == "force_push_after_approval":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="force_push_after_approval", unit="count", mode="boolean")
         if metric == "agent_commit_ratio":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_commit_ratio", unit="ratio")
         if metric == "ci_time_to_green_hours":
@@ -173,11 +183,26 @@ class AnalyticsService:
             force_push_events = sum(stat.get("force_push_events", 0) for stat in review_stats)
             rewrite_loops = sum(stat.get("rewrite_loops", 0) for stat in review_stats)
             human_followups = sum(stat.get("human_followup_commits", 0) for stat in review_stats)
+            human_followups_fast = sum(stat.get("human_followup_commits_fast", 0) for stat in review_stats)
             agent_commit_ratio_values = [stat.get("agent_commit_ratio") for stat in review_stats if stat.get("agent_commit_ratio") is not None]
             commit_lead_time_values = [stat.get("commit_lead_time_hours") for stat in review_stats if stat.get("commit_lead_time_hours") is not None]
             for stat in review_stats:
                 for label, count in (stat.get("classification_breakdown") or {}).items():
                     classification_totals[label] += count
+            human_reviewer_total = sum(stat.get("human_reviewer_count", 0) for stat in review_stats)
+            association_counts = defaultdict(int)
+            failure_name_counts = defaultdict(int)
+            failure_context_counts = defaultdict(int)
+            force_push_after_count = sum(1 for stat in review_stats if stat.get("force_push_after_approval"))
+            for stat in review_stats:
+                for assoc, count in (stat.get("reviewer_association_breakdown") or {}).items():
+                    association_counts[assoc] += count
+                for name in stat.get("ci_failed_check_names", []):
+                    if name:
+                        failure_name_counts[name] += 1
+                for context in stat.get("ci_failure_contexts", []):
+                    if context:
+                        failure_context_counts[context] += 1
 
             agent_response_rate = statistics.fmean(response_rates) if response_rates else 0.0
             agent_response_p50 = statistics.median(response_p50_values) if response_p50_values else None
@@ -224,8 +249,14 @@ class AnalyticsService:
                     force_push_events=force_push_events,
                     rewrite_loops=rewrite_loops,
                     human_followup_commits=human_followups,
+                    human_followup_commits_fast=human_followups_fast,
                     agent_commit_ratio=agent_commit_ratio,
                     commit_lead_time_hours=commit_lead_time,
+                    human_reviewer_count=human_reviewer_total,
+                    reviewer_association_breakdown=dict(sorted(association_counts.items(), key=lambda item: item[1], reverse=True)),
+                    force_push_after_approval_count=force_push_after_count,
+                    ci_failed_check_names=dict(sorted(failure_name_counts.items(), key=lambda item: item[1], reverse=True)),
+                    ci_failure_contexts=dict(sorted(failure_context_counts.items(), key=lambda item: item[1], reverse=True)),
                     top_paths=top_paths,
                     hot_files=hot_files,
                 )
@@ -324,6 +355,26 @@ class AnalyticsService:
                     commit_summary = metadata.get("commit_summary") or {}
                     timeline_summary = metadata.get("timeline_summary") or {}
                     failed_checks = ci_summary.get("failed_checks") or []
+                    reviewer_profiles = summary.get("reviewer_profiles") or []
+                    association_counts = defaultdict(int)
+                    human_reviewer_count = 0
+                    for profile in reviewer_profiles:
+                        assoc = (profile.get("association") or "unknown").lower()
+                        association_counts[assoc] += 1
+                        if (profile.get("type") or "").lower() != "bot":
+                            human_reviewer_count += 1
+                    failed_check_names = [
+                        run.get("name")
+                        for run in ci_summary.get("check_runs") or []
+                        if isinstance(run, dict) and run.get("conclusion") not in ("success", "neutral")
+                    ]
+                    if not failed_check_names:
+                        failed_check_names = [name for name in failed_checks if name]
+                    failure_contexts = [
+                        ctx.get("context")
+                        for ctx in ci_summary.get("status_contexts") or []
+                        if isinstance(ctx, dict) and ctx.get("state") not in ("success", "neutral")
+                    ]
                     combined_summary = {
                         **summary,
                         "ci_run_count": ci_summary.get("run_count", 0),
@@ -331,13 +382,20 @@ class AnalyticsService:
                         "ci_time_to_green_hours": ci_summary.get("time_to_green_hours"),
                         "ci_failed_checks": len(failed_checks),
                         "ci_latest_status": ci_summary.get("latest_status"),
+                        "ci_failed_check_names": failed_check_names,
+                        "ci_failure_contexts": failure_contexts,
                         "force_push_events": commit_summary.get("force_push_events", 0),
                         "rewrite_loops": commit_summary.get("rewrite_loops", 0),
                         "human_followup_commits": commit_summary.get("human_followup_commits", 0),
+                        "human_followup_commits_fast": commit_summary.get("human_followup_commits_fast", 0),
                         "agent_commit_ratio": commit_summary.get("agent_commit_ratio", 0.0),
                         "commit_lead_time_hours": commit_summary.get("lead_time_hours"),
                         "review_request_events": timeline_summary.get("review_requests", 0),
                         "reopen_events": timeline_summary.get("reopens", 0),
+                        "force_push_after_approval": bool(commit_summary.get("force_push_after_approval")),
+                        "human_reviewer_count": human_reviewer_count,
+                        "reviewer_profiles": reviewer_profiles,
+                        "reviewer_association_breakdown": dict(association_counts),
                     }
                     classification_breakdown = summary.get("classification_breakdown") or {}
                     combined_summary["classification_breakdown"] = classification_breakdown
@@ -529,6 +587,7 @@ class AnalyticsService:
         *,
         key: str,
         unit: str,
+        mode: str = "sum",
     ) -> AnalyticsSeries:
         _, _, review_stats_by_agent = self._collect_window_data(analyses, agent_filter)
         points: list[MetricPoint] = []
@@ -538,17 +597,25 @@ class AnalyticsService:
                 value = entry.get(key)
                 if value is None:
                     continue
-                values.append(value)
+                if mode == "boolean":
+                    values.append(1 if value else 0)
+                else:
+                    values.append(float(value))
             if not values:
-                values = [0]
+                values = [0.0]
             total = sum(values)
+            denominator = max(len(values), 1)
+            if mode == "average":
+                value = total / denominator if denominator else 0.0
+            else:
+                value = float(total)
             points.append(
                 MetricPoint(
                     metric=key,
                     agent_id=agent,
-                    value=float(total),
-                    numerator=int(total) if isinstance(total, (int, float)) else 0,
-                    denominator=max(len(values), 1),
+                    value=value,
+                    numerator=int(total),
+                    denominator=denominator,
                     window_start=window_start,
                     window_end=window_end,
                     unit=unit,

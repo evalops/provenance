@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import statistics
 import math
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 import time
 from typing import Optional, Callable, Iterable, Sequence
@@ -32,6 +32,7 @@ class ConversationComments:
     classification_counts: dict[str, int]
     unique_reviewers: set[str]
     agent_mentions: int
+    reviewer_identities: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -43,6 +44,7 @@ class ConversationReviews:
     requested_changes: int
     first_review_time: datetime | None
     first_approval_time: datetime | None
+    reviewer_identities: dict[str, dict] = field(default_factory=dict)
 
 
 class GitHubProvenanceResolver:
@@ -142,8 +144,32 @@ class GitHubProvenanceResolver:
         agent_logins = set(self._agent_map.keys())
 
         conversation = self._build_conversation_snapshot(pr, agent_logins)
+        conversation_summary = conversation.get("summary", {})
         timeline = self._collect_timeline(repo_full_name, pr_number, pr)
-        commit_summary = self._summarize_commits(pr, agent_logins, timeline.get("summary", {}))
+        timeline_summary = timeline.get("summary", {})
+
+        ready_for_review_iso = timeline_summary.get("ready_for_review_at")
+        ready_for_review_at = self._parse_iso(ready_for_review_iso)
+        first_review_iso = conversation_summary.get("first_review_submitted_at")
+        first_review_at = self._parse_iso(first_review_iso)
+        first_approval_iso = conversation_summary.get("first_approval_submitted_at")
+        first_approval_at = self._parse_iso(first_approval_iso)
+
+        if ready_for_review_at and created_at:
+            conversation_summary["time_to_ready_for_review_hours"] = self._hours_between(created_at, ready_for_review_at)
+        if ready_for_review_at and first_review_at:
+            conversation_summary["ready_to_first_review_hours"] = self._hours_between(ready_for_review_at, first_review_at)
+        if ready_for_review_at and merged_at:
+            conversation_summary["ready_to_merge_hours"] = self._hours_between(ready_for_review_at, merged_at)
+        if first_approval_at and merged_at:
+            conversation_summary["approval_to_merge_hours"] = self._hours_between(first_approval_at, merged_at)
+
+        commit_summary = self._summarize_commits(
+            pr,
+            agent_logins,
+            timeline_summary,
+            conversation_summary,
+        )
         ci_summary = self._collect_ci(repo_full_name, head_sha) if head_sha else {}
 
         metadata: dict = {
@@ -151,7 +177,7 @@ class GitHubProvenanceResolver:
             "conversation": conversation,
             "reviews": conversation.get("reviews", []),
             "comments": conversation.get("comments", []),
-            "timeline_summary": timeline.get("summary", {}),
+            "timeline_summary": timeline_summary,
             "timeline_events": timeline.get("events", []),
             "commit_summary": commit_summary,
             "ci_summary": ci_summary,
@@ -180,15 +206,29 @@ class GitHubProvenanceResolver:
         if not commit:
             return None, None, {"source": "commit", "reason": "not_found"}
         message = commit.commit.message or ""
+        trailer_agent = None
+        trailer_line = None
+        mismatch = False
         for line in message.splitlines():
             match = AGENT_TRAILER_PATTERN.match(line.strip())
             if match:
-                return match.group("agent"), None, {"source": "commit_trailer", "line": line.strip()}
+                trailer_agent = match.group("agent")
+                trailer_line = line.strip()
+                break
         for line in message.splitlines():
             match = CO_AUTHOR_PATTERN.match(line.strip())
             if match and "copilot" in match.group("author").lower():
                 return "github-copilot", None, {"source": "co_author", "value": match.group("author")}
         author_login = getattr(commit.author, "login", "") or ""
+        if trailer_agent:
+            if author_login and trailer_agent.lower() != author_login.lower():
+                mismatch = True
+            evidence = {"source": "commit_trailer", "line": trailer_line}
+            if author_login:
+                evidence["author_login"] = author_login
+                if mismatch:
+                    evidence["provenance_mismatch"] = True
+            return trailer_agent, None, evidence
         if author_login:
             mapped = self._agent_map.get(author_login.lower())
             return mapped or author_login, None, {"source": "commit_author", "value": author_login}
@@ -286,7 +326,7 @@ class GitHubProvenanceResolver:
         now = time.monotonic()
         if cached and cached[0] > now:
             return cached[1]
-        summary = {
+        summary: dict[str, object] = {
             "run_count": 0,
             "failure_count": 0,
             "latest_status": None,
@@ -294,6 +334,8 @@ class GitHubProvenanceResolver:
             "failed_checks": [],
             "last_failure_at": None,
             "last_success_at": None,
+            "status_contexts": [],
+            "check_runs": [],
         }
         try:
             repo = self._client.get_repo(repo_full_name)
@@ -317,6 +359,15 @@ class GitHubProvenanceResolver:
                 else:
                     if updated_at and (latest_success_at is None or updated_at > latest_success_at):
                         latest_success_at = updated_at
+                summary["status_contexts"].append(
+                    {
+                        "context": getattr(status, "context", None),
+                        "state": status.state,
+                        "target_url": getattr(status, "target_url", None),
+                        "description": getattr(status, "description", None),
+                        "updated_at": self._coerce_iso(updated_at),
+                    }
+                )
             try:
                 check_runs = commit.get_check_runs()
                 check_items = list(check_runs)
@@ -335,6 +386,16 @@ class GitHubProvenanceResolver:
                 elif concluded == "success":
                     if completed_at and (latest_success_at is None or completed_at > latest_success_at):
                         latest_success_at = completed_at
+                summary["check_runs"].append(
+                    {
+                        "name": getattr(run, "name", None),
+                        "status": getattr(run, "status", None),
+                        "conclusion": concluded,
+                        "started_at": self._coerce_iso(getattr(run, "started_at", None)),
+                        "completed_at": self._coerce_iso(getattr(run, "completed_at", None)),
+                        "details_url": getattr(run, "html_url", None) or getattr(run, "details_url", None),
+                    }
+                )
             summary["failure_count"] = failure_count
             summary["failed_checks"] = sorted(check for check in failed_checks if check)
             summary["last_failure_at"] = self._coerce_iso(earliest_failure_at)
@@ -359,6 +420,9 @@ class GitHubProvenanceResolver:
             comments_info.classification_counts, reviews_info.classification_counts
         )
         unique_reviewers = comments_info.unique_reviewers | reviews_info.unique_reviewers
+        reviewer_identities = self._merge_identities(
+            comments_info.reviewer_identities, reviews_info.reviewer_identities
+        )
 
         created_at = getattr(pr, "created_at", None)
         merged_at = getattr(pr, "merged_at", None)
@@ -374,6 +438,7 @@ class GitHubProvenanceResolver:
             "reopened_threads": thread_metrics["reopened_threads"],
             "classification_breakdown": dict(sorted(classification_counts.items(), key=lambda item: item[1], reverse=True)),
             "agent_response_rate": thread_metrics["response_rate"],
+            "reviewer_profiles": list(reviewer_identities.values()),
         }
 
         if thread_metrics["response_latencies"]:
@@ -386,6 +451,10 @@ class GitHubProvenanceResolver:
             summary["time_to_first_approval_hours"] = self._hours_between(created_at, reviews_info.first_approval_time)
         if created_at and merged_at:
             summary["time_to_merge_hours"] = self._hours_between(created_at, merged_at)
+        if reviews_info.first_review_time:
+            summary["first_review_submitted_at"] = self._coerce_iso(reviews_info.first_review_time)
+        if reviews_info.first_approval_time:
+            summary["first_approval_submitted_at"] = self._coerce_iso(reviews_info.first_approval_time)
 
         return {
             "comments": comments_info.serialized,
@@ -406,6 +475,7 @@ class GitHubProvenanceResolver:
         classification_counts: dict[str, int] = defaultdict(int)
         unique_reviewers: set[str] = set()
         agent_mentions = 0
+        reviewer_identities: dict[str, dict] = {}
 
         for comment in issue_comments:
             entry, thread_key, event, classification = self._serialize_comment(
@@ -416,6 +486,7 @@ class GitHubProvenanceResolver:
             classification_counts[classification] += 1
             if event.author and not event.is_agent:
                 unique_reviewers.add(event.author)
+                reviewer_identities.setdefault(event.author, self._extract_user_profile(comment, event.author))
             if AGENT_TRAILER_PATTERN.search(entry["body"]):
                 agent_mentions += 1
 
@@ -428,6 +499,7 @@ class GitHubProvenanceResolver:
             classification_counts[classification] += 1
             if event.author and not event.is_agent:
                 unique_reviewers.add(event.author)
+                reviewer_identities.setdefault(event.author, self._extract_user_profile(comment, event.author))
             if AGENT_TRAILER_PATTERN.search(entry["body"]):
                 agent_mentions += 1
 
@@ -438,6 +510,7 @@ class GitHubProvenanceResolver:
             classification_counts=dict(classification_counts),
             unique_reviewers=unique_reviewers,
             agent_mentions=agent_mentions,
+            reviewer_identities=reviewer_identities,
         )
 
     def _summarize_reviews(
@@ -452,6 +525,7 @@ class GitHubProvenanceResolver:
         requested_changes = 0
         first_review_time: datetime | None = None
         first_approval_time: datetime | None = None
+        reviewer_identities: dict[str, dict] = {}
 
         for review in reviews:
             submitted_at = getattr(review, "submitted_at", None)
@@ -469,6 +543,7 @@ class GitHubProvenanceResolver:
             classification_counts[classification] += 1
             if author_login and not self._is_agent_login(author_login, agent_logins):
                 unique_reviewers.add(author_login)
+                reviewer_identities.setdefault(author_login, self._extract_user_profile(review, author_login))
             if submitted_at and (first_review_time is None or submitted_at < first_review_time):
                 first_review_time = submitted_at
             if review.state == "APPROVED":
@@ -486,6 +561,7 @@ class GitHubProvenanceResolver:
             requested_changes=requested_changes,
             first_review_time=first_review_time,
             first_approval_time=first_approval_time,
+            reviewer_identities=reviewer_identities,
         )
 
     def _summarize_threads(
@@ -496,7 +572,6 @@ class GitHubProvenanceResolver:
         response_latencies: list[float] = []
         responded_threads = 0
         reopened_threads = 0
-
         for thread_id, events in thread_events.items():
             sorted_events = self._sort_events(events)
             participants = sorted({event.author for event in sorted_events if event.author})
@@ -596,6 +671,35 @@ class GitHubProvenanceResolver:
         epoch = datetime.fromtimestamp(0, tz=timezone.utc)
         return sorted(events, key=lambda event: event.created_at or epoch)
 
+    @staticmethod
+    def _merge_identities(primary: dict[str, dict], secondary: dict[str, dict]) -> dict[str, dict]:
+        merged = {**primary}
+        for login, profile in secondary.items():
+            merged.setdefault(login, profile)
+        return merged
+
+    def _extract_user_profile(self, source_obj, login: str) -> dict:
+        user = getattr(source_obj, "user", None)
+        profile = {"login": login}
+        if not user:
+            return profile
+        for attr in ("name", "type", "company", "email", "location"):
+            profile[attr] = getattr(user, attr, None)
+        association = getattr(source_obj, "author_association", None)
+        profile["association"] = association
+        return profile
+
+    @staticmethod
+    def _parse_iso(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            if value.endswith("Z"):
+                value = value[:-1] + "+00:00"
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
     def _collect_timeline(self, repo_full_name: str, pr_number: int, pr=None) -> dict:
         key = (repo_full_name, pr_number)
         cached = self._timeline_cache.get(key)
@@ -603,7 +707,22 @@ class GitHubProvenanceResolver:
         if cached and cached[0] > now:
             return cached[1]
 
-        data = {"events": [], "summary": {"force_pushes": 0, "reopens": 0, "merge_events": 0, "review_requests": 0, "review_dismissals": 0}}
+        data = {
+            "events": [],
+            "summary": {
+                "force_pushes": 0,
+                "reopens": 0,
+                "merge_events": 0,
+                "review_requests": 0,
+                "review_dismissals": 0,
+                "last_force_push_at": None,
+                "last_reopen_at": None,
+                "last_merge_at": None,
+                "last_review_request_at": None,
+                "ready_for_review_at": None,
+                "converted_to_draft_at": None,
+            },
+        }
         timeline_items: list = []
         try:
             target_pr = pr or self._get_pull(repo_full_name, pr_number)
@@ -638,17 +757,33 @@ class GitHubProvenanceResolver:
                 "review_requested",
                 "review_request_removed",
                 "review_dismissed",
+                "ready_for_review",
+                "converted_to_draft",
             }:
                 continue
             summary_counts[event_type] += 1
+            created_at = getattr(item, "created_at", None)
+            created_iso = self._coerce_iso(created_at)
             events.append(
                 {
                     "type": event_type,
                     "actor": getattr(getattr(item, "actor", None), "login", None),
-                    "created_at": self._coerce_iso(getattr(item, "created_at", None)),
+                    "created_at": created_iso,
                     "commit_id": getattr(item, "head_sha", None) or getattr(item, "commit_id", None),
                 }
             )
+            if event_type == "head_ref_force_pushed":
+                data["summary"]["last_force_push_at"] = created_iso
+            elif event_type == "reopened":
+                data["summary"]["last_reopen_at"] = created_iso
+            elif event_type == "merged":
+                data["summary"]["last_merge_at"] = created_iso
+            elif event_type == "review_requested":
+                data["summary"]["last_review_request_at"] = created_iso
+            elif event_type == "ready_for_review" and data["summary"]["ready_for_review_at"] is None:
+                data["summary"]["ready_for_review_at"] = created_iso
+            elif event_type == "converted_to_draft":
+                data["summary"]["converted_to_draft_at"] = created_iso
 
         data["events"] = events
         data["summary"] = {
@@ -657,11 +792,23 @@ class GitHubProvenanceResolver:
             "merge_events": summary_counts.get("merged", 0),
             "review_requests": summary_counts.get("review_requested", 0),
             "review_dismissals": summary_counts.get("review_dismissed", 0),
+            "last_force_push_at": data["summary"]["last_force_push_at"],
+            "last_reopen_at": data["summary"]["last_reopen_at"],
+            "last_merge_at": data["summary"]["last_merge_at"],
+            "last_review_request_at": data["summary"]["last_review_request_at"],
+            "ready_for_review_at": data["summary"]["ready_for_review_at"],
+            "converted_to_draft_at": data["summary"]["converted_to_draft_at"],
         }
         self._timeline_cache[key] = (now + self._cache_ttl, data)
         return data
 
-    def _summarize_commits(self, pr, agent_logins: set[str], timeline_summary: dict) -> dict:
+    def _summarize_commits(
+        self,
+        pr,
+        agent_logins: set[str],
+        timeline_summary: dict,
+        review_summary: dict,
+    ) -> dict:
         try:
             commits = list(pr.get_commits())
         except GithubException:
@@ -674,6 +821,7 @@ class GitHubProvenanceResolver:
         revert_commits = 0
         commit_moments: list[dict] = []
         human_followups = 0
+        human_followups_fast = 0
         rewrite_loops = 0
 
         for commit in commits:
@@ -709,6 +857,8 @@ class GitHubProvenanceResolver:
                 delta = self._hours_between(current["created_at"], nxt["created_at"])
                 if delta is not None:
                     human_followups += 1
+                    if delta <= 1:
+                        human_followups_fast += 1
                     if delta <= 48:
                         rewrite_loops += 1
         intervals: list[float] = []
@@ -727,6 +877,7 @@ class GitHubProvenanceResolver:
             "revert_commits": revert_commits,
             "force_push_events": timeline_summary.get("force_pushes", 0),
             "human_followup_commits": human_followups,
+            "human_followup_commits_fast": human_followups_fast,
             "rewrite_loops": rewrite_loops,
             "agent_commit_ratio": (agent_commits / total_commits) if total_commits else 0.0,
             "commits": commit_entries,
@@ -738,6 +889,13 @@ class GitHubProvenanceResolver:
         commit_times = [meta["created_at"] for meta in sorted_moments if meta["created_at"]]
         if commit_times:
             summary["lead_time_hours"] = self._hours_between(min(commit_times), max(commit_times))
+        last_force_push_at = timeline_summary.get("last_force_push_at")
+        first_approval_iso = review_summary.get("first_approval_submitted_at")
+        if last_force_push_at and first_approval_iso:
+            force_push_dt = self._parse_iso(last_force_push_at)
+            approval_dt = self._parse_iso(first_approval_iso)
+            if force_push_dt and approval_dt and force_push_dt > approval_dt:
+                summary["force_push_after_approval"] = True
 
         return summary
 
