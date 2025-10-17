@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -103,6 +104,12 @@ def main() -> None:
     response = submit_analysis(args.api_url, args.api_token, payload)
     analysis_id = response["analysis_id"]
     decision = poll_decision(args.api_url, args.api_token, analysis_id)
+    write_response_path = os.getenv("PROVENANCE_WRITE_RESPONSE_PATH")
+    if write_response_path:
+        out_path = Path(write_response_path)
+        if not out_path.parent.exists():
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(decision, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(decision, indent=2))
     decision_info = decision.get("decision") or {}
     outcome_value = decision_info.get("outcome") or decision.get("status")

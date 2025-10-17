@@ -187,6 +187,7 @@ The same process works against forks or sandboxes—helpful when validating new 
 - The workflow helper collects the PR diff (`base_sha..head_sha`), submits it to `/v1/analysis`, polls `/v1/analysis/{id}`, and prints the enriched decision payload so reviewers can inspect risk summaries inline.
 - Consume `/v1/analysis/{id}/sarif` when you need static-analysis interoperability (e.g., uploading to GitHub code scanning or aggregating findings in other dashboards).
 - Surface decision bundles in CI by hitting `/v1/analysis/{id}/bundle` (e.g., attach the DSSE envelope as a build artifact) to preserve signed provenance for downstream policy checks.
+- See [docs/ci-integration.md](docs/ci-integration.md) for a comprehensive workflow guide, SARIF upload recipe, artifact archiving, and non-GitHub CI examples.
 
 ## Telemetry Export
 
@@ -217,6 +218,12 @@ The same process works against forks or sandboxes—helpful when validating new 
 - Generate an OpenAPI schema with `make docs` (writes `openapi.json`).
 - A lightweight synchronous client lives in `clients/python`; use `ProvenanceClient` for basic ingestion/status/analytics calls.
 - Async support is available via `AsyncProvenanceClient`. Install the client SDK with `pip install provenance[client]` and import from `clients.python`.
+
+## Additional Documentation
+
+- [CI Integration Guide](docs/ci-integration.md) – Configure GitHub Actions, upload SARIF, archive decision bundles, and adapt the workflow to other CI systems.
+- [SARIF Reporting](docs/sarif.md) – Understand the SARIF 2.1.0 output, severity mapping, and customization hooks.
+- [DSSE Decision Bundles](docs/decision-bundles.md) – Inspect the envelope schema, verify signatures, and integrate with transparency logs.
 
 ## Data Persistence Model
 
