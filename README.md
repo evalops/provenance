@@ -86,7 +86,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_REVIEWER_TEAM_MAP` | JSON map of reviewer logins to team names for cohort reporting | `{}` |
 | `PROVENANCE_TEAM_REVIEW_BUDGETS` | JSON map of team names to max expected human review counts per window | `{}` |
 
-## Detection with Semgrep
+## Detection Pipeline
 
 - Rules are bundled in `app/detection_rules/semgrep_rules.yml`.
 - Override with your own rule pack by setting `PROVENANCE_SEMGREP_CONFIG_PATH` (file path, directory, or remote Semgrep registry URL).
@@ -99,9 +99,13 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - The JSON results are mapped back to the originating changed lines so findings retain repo/PR/file/line attribution.
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
-- When GitHub credentials are configured, the service automatically inspects commit trailers, PR labels, review comments, reviewer identities, and PR timelines to fill missing agent attribution and capture structured evidence (see `app/provenance/github_resolver.py`).
-- The resolver also persists PR conversations (thread counts, classification breakdowns, agent response latency), CI outcomes (time-to-green, failed checks), and commit/timeline summaries (force pushes, human follow-ups, rewrite loops) so analytics can surface behavioral signals without re-calling the GitHub API.
-- Built-in heuristics now include a Python import detector that flags risky modules (e.g., `subprocess`, `pickle`); extend this pattern with your own detectors via modular hooks.
+- Built-in heuristics include a Python import detector that flags risky modules (e.g., `subprocess`, `pickle`); extend this pattern with your own detectors via modular hooks.
+
+## GitHub Provenance Enrichment
+
+- When GitHub credentials are configured, the service inspects commit trailers, PR labels, review comments, reviewer identities/teams, and PR timelines to fill missing agent attribution (see `app/provenance/github_resolver.py`).
+- The resolver persists review conversations (thread counts, team participation, bot override details, classification breakdowns, response latency), CI outcomes (time-to-green, failing check taxonomy), and commit/timeline summaries (force pushes, human follow-ups, rewrite loops) so analytics/governance can act without re-crawling GitHub.
+- Governance automatically raises alerts when bot change requests are bypassed or force-pushes land after approval; `/v1/analytics/review-alerts` and `/v1/analytics/review-load` expose the same signals for monitoring.
 
 ## API Surface
 
