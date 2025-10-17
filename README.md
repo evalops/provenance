@@ -222,8 +222,8 @@ The same process works against forks or sandboxes—helpful when validating new 
 ## Additional Documentation
 
 - [CI Integration Guide](docs/ci-integration.md) – Configure GitHub Actions, upload SARIF, archive decision bundles, and adapt the workflow to other CI systems.
-- [SARIF Reporting](docs/sarif.md) – Understand the SARIF 2.1.0 output, severity mapping, and customization hooks.
-- [DSSE Decision Bundles](docs/decision-bundles.md) – Inspect the envelope schema, verify signatures, and integrate with transparency logs.
+- [SARIF Reporting](docs/sarif-reporting.md) – Understand the SARIF 2.1.0 output, severity mapping, and customization hooks.
+- [DSSE Decision Bundles](docs/dsse-decision-bundles.md) – Inspect the envelope schema, verify signatures, and integrate with transparency logs.
 
 ## Data Persistence Model
 
