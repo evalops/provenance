@@ -2,31 +2,98 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "provenance.fullname" . }}-redis
+  name: {{ include "provenance.redisFullname" . }}
+  labels:
+    {{- include "provenance.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ include "provenance.fullname" . }}-redis
+      app.kubernetes.io/name: {{ include "provenance.redisFullname" . }}
+      app.kubernetes.io/component: redis
+      app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: {{ include "provenance.fullname" . }}-redis
+        app.kubernetes.io/name: {{ include "provenance.redisFullname" . }}
+        app.kubernetes.io/component: redis
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       containers:
         - name: redis
-          image: {{ .Values.redis.image }}
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
           ports:
-            - containerPort: 6379
+            - containerPort: {{ .Values.redis.service.port }}
+              name: redis
+          args:
+            - "--save"
+            - ""
+            - "--appendonly"
+            - "yes"
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          {{- with .Values.redis.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: redis-data
+          {{- if .Values.redis.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "provenance.redisFullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: redis
+  name: {{ include "provenance.redisFullname" . }}
+  labels:
+    {{- include "provenance.labels" . | nindent 4 }}
 spec:
+  type: ClusterIP
   ports:
-    - port: 6379
-      targetPort: 6379
+    - port: {{ .Values.redis.service.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
   selector:
-    app: {{ include "provenance.fullname" . }}-redis
+    app.kubernetes.io/name: {{ include "provenance.redisFullname" . }}
+    app.kubernetes.io/component: redis
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Values.redis.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "provenance.redisFullname" . }}-data
+  labels:
+    {{- include "provenance.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- range .Values.redis.persistence.accessModes }}
+    - {{ . }}
+    {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size }}
+  {{- if .Values.redis.persistence.storageClass }}
+  storageClassName: {{ .Values.redis.persistence.storageClass }}
+  {{- end }}
+{{- end }}
 {{- end }}

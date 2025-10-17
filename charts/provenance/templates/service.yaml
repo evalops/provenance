@@ -3,10 +3,11 @@ kind: Service
 metadata:
   name: {{ include "provenance.fullname" . }}
   labels:
-    app.kubernetes.io/name: {{ include "provenance.name" . }}
-    helm.sh/chart: {{ include "provenance.chart" . }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    {{- include "provenance.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -15,5 +16,4 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app.kubernetes.io/name: {{ include "provenance.name" . }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include "provenance.selectorLabels" . | nindent 4 }}

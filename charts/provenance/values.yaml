@@ -1,24 +1,92 @@
+replicaCount: 2
+
 image:
   repository: evalops/provenance
   tag: "latest"
   pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+commonLabels: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+securityContext: {}
+
 service:
   type: ClusterIP
   port: 8000
+  annotations: {}
+
+env:
+  PROVENANCE_SERVICE_BASE_URL: http://provenance:8000
+extraEnv: []
+extraEnvFrom: []
 
 resources: {}
 
-env:
-  PROVENANCE_REDIS_URL: redis://redis:6379/0
-  PROVENANCE_SERVICE_BASE_URL: http://provenance:8000
+livenessProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 1
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  path: /healthz
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 1
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+extraVolumeMounts: []
+extraVolumes: []
 
 redis:
   enabled: true
-  image: redis:7-alpine
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  service:
+    port: 6379
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  persistence:
+    enabled: false
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    storageClass: ""
 
 ingress:
   enabled: false
+  className: ""
   annotations: {}
   hosts:
     - host: provenance.local
