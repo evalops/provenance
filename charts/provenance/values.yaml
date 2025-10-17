@@ -1,5 +1,5 @@
 image:
-  repository: haasonsaas/provenance
+  repository: evalops/provenance
   tag: "latest"
   pullPolicy: IfNotPresent
 

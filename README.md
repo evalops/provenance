@@ -85,6 +85,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_CACHE_TTL_SECONDS` | Cache TTL (seconds) for GitHub metadata lookups | `300` |
 | `PROVENANCE_GITHUB_AGENT_MAP` | JSON map of GitHub logins/keywords to agent IDs | `{}` |
 | `PROVENANCE_GITHUB_REVIEWER_TEAM_MAP` | JSON map of reviewer logins to team names for cohort reporting | `{}` |
+| `PROVENANCE_TEAM_REVIEW_BUDGETS` | JSON map of team names to max expected human review counts per window | `{}` |
 
 ## Detection with Semgrep
 
