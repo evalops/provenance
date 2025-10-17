@@ -229,6 +229,7 @@ The same process works against forks or sandboxes—helpful when validating new 
 - [Deployment & Operations Guide](docs/deployment-guide.md) – Deploy with Docker/Kubernetes, scale detectors, and instrument observability.
 - [SARIF Reporting](docs/sarif-reporting.md) – Understand the SARIF 2.1.0 output, severity mapping, and customization hooks.
 - [DSSE Decision Bundles](docs/dsse-decision-bundles.md) – Inspect the envelope schema, verify signatures, and integrate with transparency logs.
+- [Release Process](docs/release-process.md) – Publish application releases and Helm charts with the bundled workflows.
 
 ## Data Persistence Model
 

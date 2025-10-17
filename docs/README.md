@@ -10,3 +10,4 @@ This directory contains task-focused guides that go deeper than the root `README
 - [Deployment & Operations Guide](deployment-guide.md) — Deploy the API with Docker or Kubernetes and operate it in production.
 - [SARIF Reporting](sarif-reporting.md) — Understand the SARIF 2.1.0 output and tailor it for downstream scanners.
 - [DSSE Decision Bundles](dsse-decision-bundles.md) — Inspect the DSSE envelope, verify signatures, and extend transparency workflows.
+- [Release Process](release-process.md) — Run end-to-end release workflows for the app and Helm chart.
