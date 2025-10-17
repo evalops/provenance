@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import settings
-from app.routers import analysis, analytics, governance
+from app.routers import analysis, analytics, governance, detectors
 from app.telemetry import configure_metrics, shutdown_metrics, collect_prometheus_metrics
 from app.dependencies import get_event_sink
 
@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis.router)
     app.include_router(analytics.router)
     app.include_router(governance.router)
+    app.include_router(detectors.router)
 
     @app.get("/healthz", tags=["health"])
     def healthcheck() -> dict[str, str]:

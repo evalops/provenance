@@ -7,6 +7,7 @@ import subprocess
 from importlib import import_module
 from collections import defaultdict
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Sequence
 
@@ -41,12 +42,16 @@ class DetectionService:
             config_override = semgrep_config_path or settings.semgrep_config_path
             detectors = [SemgrepDetector(config_path=config_override)]
         self._detectors = list(detectors) + builtin_detectors + external_detectors
+        self._capabilities = [detector.capabilities() for detector in self._detectors]
 
     def run(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         findings: list[Finding] = []
         for detector in self._detectors:
             findings.extend(detector.execute(record, lines))
         return findings
+
+    def list_capabilities(self) -> list[dict]:
+        return self._capabilities.copy()
 
     @staticmethod
     def _load_external_detectors(module_paths: Sequence[str]) -> list["BaseDetector"]:
@@ -76,9 +81,19 @@ class BaseDetector:
     default_severity = SeverityLevel.MEDIUM
     rule_key = "BASE000"
     category = "general"
+    description = ""
 
     def execute(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         raise NotImplementedError
+
+    def capabilities(self) -> dict:
+        """Return metadata describing this detector."""
+        return {
+            "name": self.name,
+            "rule_key": self.rule_key,
+            "category": self.category,
+            "description": self.description,
+        }
 
     def _build_finding(
         self,
@@ -111,6 +126,7 @@ class SemgrepDetector(BaseDetector):
     name = "semgrep"
     rule_key = "semgrep"
     category = "general"
+    description = "Runs Semgrep rules against changed lines."
 
     CONFIG_PATH = Path(__file__).resolve().parent.parent / "detection_rules" / "semgrep_rules.yml"
     CATEGORY_MAP = {
@@ -129,6 +145,32 @@ class SemgrepDetector(BaseDetector):
             self.config_path = Path(config_path).expanduser()
         else:
             self.config_path = self.CONFIG_PATH
+
+    def capabilities(self) -> dict:
+        metadata = super().capabilities()
+        metadata.update(
+            {
+                "config_path": str(self.config_path),
+                "config_sha256": self._config_digest(),
+                "last_modified": self._config_mtime(),
+            }
+        )
+        return metadata
+
+    def _config_digest(self) -> str | None:
+        try:
+            data = self.config_path.read_bytes()
+        except FileNotFoundError:
+            return None
+        return sha256(data).hexdigest()
+
+    def _config_mtime(self) -> str | None:
+        try:
+            stat = self.config_path.stat()
+        except FileNotFoundError:
+            return None
+        dt = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+        return dt.isoformat()
 
     def execute(self, record: AnalysisRecord, lines: list[ChangedLine]) -> list[Finding]:
         filtered_lines = [line for line in lines if line.change_type != ChangeType.DELETED]

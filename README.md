@@ -105,6 +105,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 - Extend the rule pack or point the detector at your organization-wide Semgrep registry by updating `SemgrepDetector` in `app/services/detection.py`.
 - Register additional detectors by providing module paths in `PROVENANCE_DETECTOR_MODULE_PATHS`; each module should expose `register_detectors()` returning `BaseDetector` instances.
 - Built-in heuristics include a Python import detector that flags risky modules (e.g., `subprocess`, `pickle`); extend this pattern with your own detectors via modular hooks.
+- Introspect active detectors via `/v1/detectors/capabilities` to confirm bundled Semgrep packs, digests, and custom modules loaded at runtime.
 
 ## GitHub Provenance Enrichment
 
@@ -123,6 +124,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `/v1/analysis/{id}/decision` | `GET` | Fetch the governance decision (allow/block/warn) with evidence |
 | `/v1/analytics/summary` | `GET` | Retrieve aggregated KPIs (risk rate, provenance, volume, churn, complexity, etc.) |
 | `/v1/analytics/agents/behavior` | `GET` | Retrieve composite behavioral snapshots for each agent |
+| `/v1/detectors/capabilities` | `GET` | Enumerate active detectors (Semgrep configs, versions, metadata) |
 | `/metrics` | `GET` | Prometheus scrape endpoint (when exporter is `prometheus`) |
 
 Example ingestion payload:
