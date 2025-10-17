@@ -68,3 +68,39 @@ class TeamReviewLoadEntry(BaseModel):
 class TeamReviewLoadResponse(BaseModel):
     load: list[TeamReviewLoadEntry]
     request_id: str
+
+
+class TeamBudgetAlert(BaseModel):
+    team: str
+    human_reviewers: int
+    budget: int
+    overage: int
+
+
+class TeamBudgetResponse(BaseModel):
+    alerts: list[TeamBudgetAlert]
+    request_id: str
+
+
+class CIFailureEntry(BaseModel):
+    name: str
+    count: int
+    agent_id: str | None = None
+
+
+class CIFailureHeatmapResponse(BaseModel):
+    failures: list[CIFailureEntry]
+    request_id: str
+
+
+class ReviewerDriftEntry(BaseModel):
+    agent_id: str
+    human_reviewers: int
+    bot_reviews: int
+    ratio: float
+    human_reviewer_teams: dict[str, int] = Field(default_factory=dict)
+
+
+class ReviewerDriftResponse(BaseModel):
+    drifts: list[ReviewerDriftEntry]
+    request_id: str

@@ -585,9 +585,20 @@ def test_review_alert_detection_and_trend():
                     "bot_reviewer_count": 2,
                     "bot_comment_count": 4,
                     "human_reviewer_count": 1,
+                    "reviewer_profiles": [
+                        {"login": "bot-a", "type": "Bot", "association": "NONE", "team": None},
+                        {"login": "human-x", "type": "User", "association": "MEMBER", "team": "platform"},
+                    ],
+                    "human_reviewer_teams": {"platform": 1},
                 },
                 "commit_summary": {
                     "force_push_after_approval": False,
+                },
+                "ci_summary": {
+                    "check_runs": [
+                        {"name": "deploy-ci", "conclusion": "failure"},
+                        {"name": "integration", "conclusion": "failure"},
+                    ]
                 },
             },
         },
@@ -622,7 +633,20 @@ def test_review_alert_detection_and_trend():
     override_trend = next(item for item in trend if item["agent_id"] == "override-bot")
     assert override_trend["bot_reviews"] == 3
     assert override_trend["human_reviewers"] == 1
-    assert override_trend["human_reviewer_teams"] == {}
+    assert override_trend["human_reviewer_teams"] == {"platform": 1}
 
     team_load = analytics.team_review_load(time_window="2d")
-    assert team_load == []
+    assert team_load == [{"team": "platform", "human_reviewers": 1}]
+
+    budgets = {"platform": 0}
+    analytics_budget = AnalyticsService(analytics._store, team_budgets=budgets)
+    # Reuse data already in store; enforce budgets should flag overage
+    alerts = analytics_budget.enforce_team_budgets(time_window="2d")
+    assert alerts and alerts[0]["team"].lower() == "platform"
+    assert alerts[0]["overage"] == 1
+
+    drift = analytics.detect_reviewer_drift(time_window="2d", human_threshold=1, ratio_threshold=0.1)
+    assert any(entry["agent_id"] == "override-bot" for entry in drift)
+
+    heatmap = analytics.ci_failure_heatmap(time_window="2d")
+    assert any(entry["name"] == "deploy-ci" for entry in heatmap)

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.identifiers import new_decision_id
+from app.telemetry import EventSink, NullEventSink
 from app.models.domain import (
     AnalysisRecord,
     ChangedLine,
@@ -23,6 +24,9 @@ def _now():
 
 class GovernanceService:
     """Evaluates policy decisions based on findings and provenance coverage."""
+
+    def __init__(self, sink: EventSink | None = None) -> None:
+        self._sink = sink or NullEventSink()
 
     def evaluate(
         self,
@@ -97,6 +101,14 @@ class GovernanceService:
             risk_summary["bot_block_overrides"] = bot_override_count
             risk_summary["bot_block_resolved"] = bot_block_resolved
             risk_summary["force_push_after_approval"] = bool(force_push_after_approval)
+            self._emit_review_alert(
+                record=record,
+                review_summary=review_summary,
+                commit_summary=commit_summary,
+                overrides=bot_override_count,
+                resolved=bot_block_resolved,
+                force_push=bool(force_push_after_approval),
+            )
 
         return PolicyDecision(
             decision_id=new_decision_id(),
@@ -134,3 +146,31 @@ class GovernanceService:
             "findings_by_category": dict(by_category),
             "findings_by_severity": dict(by_severity),
         }
+
+    def _emit_review_alert(
+        self,
+        *,
+        record: AnalysisRecord,
+        review_summary: dict,
+        commit_summary: dict,
+        overrides: int,
+        resolved: int,
+        force_push: bool,
+    ) -> None:
+        event = {
+            "event_type": "review_override_alert",
+            "analysis_id": record.analysis_id,
+            "repo_id": record.repo_id,
+            "pr_number": record.pr_number,
+            "overrides": overrides,
+            "resolved": resolved,
+            "force_push_after_approval": force_push,
+            "override_details": review_summary.get("bot_block_override_details", []),
+            "merge_actor": commit_summary.get("last_merge_actor"),
+            "merged_at": commit_summary.get("last_merge_at"),
+            "timestamp": _now().isoformat(),
+        }
+        try:
+            self._sink.publish(event)
+        except Exception:  # pragma: no cover - telemetry should not break decision flow
+            pass

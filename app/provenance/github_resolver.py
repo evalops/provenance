@@ -745,6 +745,12 @@ class GitHubProvenanceResolver:
             "created_at": self._coerce_iso(created_at),
             "updated_at": self._coerce_iso(updated_at),
             "is_bot": is_bot,
+            "path": getattr(comment, "path", None),
+            "line": getattr(comment, "line", None),
+            "original_line": getattr(comment, "original_line", None),
+            "position": getattr(comment, "position", None),
+            "original_position": getattr(comment, "original_position", None),
+            "diff_hunk": getattr(comment, "diff_hunk", None),
         }
         if comment_type == "review_comment":
             serialized["in_reply_to_id"] = getattr(comment, "in_reply_to_id", None)

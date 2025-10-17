@@ -14,6 +14,17 @@ from app.models.domain import (
     SeverityLevel,
 )
 from app.services.governance import GovernanceService
+
+
+class StubSink:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def publish(self, event: dict) -> None:
+        self.events.append(event)
+
+    def close(self) -> None:
+        return None
 from app.core.config import Settings
 
 
@@ -191,7 +202,8 @@ def test_category_thresholds_override(monkeypatch):
 def test_bot_override_triggers_warn(monkeypatch):
     settings = Settings()
     monkeypatch.setattr("app.services.governance.settings", settings)
-    service = GovernanceService()
+    sink = StubSink()
+    service = GovernanceService(sink)
     record = _baseline_record()
     record.provenance_inputs = {
         "github_metadata": {
@@ -209,12 +221,17 @@ def test_bot_override_triggers_warn(monkeypatch):
     assert decision.outcome.value == "warn"
     assert decision.risk_summary["bot_block_overrides"] == 2
     assert decision.risk_summary["bot_block_resolved"] == 1
+    assert sink.events
+    alert = sink.events[-1]
+    assert alert["event_type"] == "review_override_alert"
+    assert alert["overrides"] == 2
 
 
 def test_bot_override_blocks_when_policy_enabled(monkeypatch):
     settings = Settings(provenance_block_on_unknown=True)
     monkeypatch.setattr("app.services.governance.settings", settings)
-    service = GovernanceService()
+    sink = StubSink()
+    service = GovernanceService(sink)
     record = _baseline_record()
     record.provenance_inputs = {
         "github_metadata": {
@@ -230,3 +247,4 @@ def test_bot_override_blocks_when_policy_enabled(monkeypatch):
     decision = service.evaluate(record, [], [])
     assert decision.outcome.value == "block"
     assert decision.risk_summary["force_push_after_approval"] is True
+    assert sink.events

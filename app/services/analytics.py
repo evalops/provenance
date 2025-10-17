@@ -41,10 +41,16 @@ def _now() -> datetime:
 class AnalyticsService:
     """Produces aggregated analytics for reporting and governance."""
 
-    def __init__(self, store: RedisWarehouse, sink: EventSink | None = None) -> None:
+    def __init__(
+        self,
+        store: RedisWarehouse,
+        sink: EventSink | None = None,
+        team_budgets: dict[str, int] | None = None,
+    ) -> None:
         self._store = store
         self._sink = sink or NullEventSink()
         self._team_map = {k.lower(): v for k, v in settings.github_reviewer_team_map.items()}
+        self._team_budgets = {k.lower(): v for k, v in (team_budgets or {}).items()}
 
     def index_analysis(
         self,
@@ -816,6 +822,95 @@ class AnalyticsService:
             {"team": team, "human_reviewers": count}
             for team, count in sorted(team_totals.items(), key=lambda item: item[1], reverse=True)
         ]
+
+    def enforce_team_budgets(self, time_window: str) -> list[dict]:
+        if not self._team_budgets:
+            return []
+        entries = self.team_review_load(time_window)
+        overages: list[dict] = []
+        budget_map = self._team_budgets
+        for entry in entries:
+            team_key = entry["team"].lower()
+            budget = budget_map.get(team_key)
+            if budget is None:
+                continue
+            if entry["human_reviewers"] > budget:
+                overages.append(
+                    {
+                        "team": entry["team"],
+                        "human_reviewers": entry["human_reviewers"],
+                        "budget": budget,
+                        "overage": entry["human_reviewers"] - budget,
+                    }
+                )
+        overages.sort(key=lambda item: item["overage"], reverse=True)
+        return overages
+
+    def detect_reviewer_drift(
+        self,
+        time_window: str,
+        *,
+        human_threshold: int = 1,
+        ratio_threshold: float = 0.5,
+    ) -> list[dict]:
+        window = _parse_window(time_window)
+        window_end = _now()
+        window_start = window_end - window
+        analyses = self._filter_analyses(window_start)
+        _, _, review_stats_by_agent = self._collect_window_data(analyses, None)
+        drifts: list[dict] = []
+        for agent, stats in review_stats_by_agent.items():
+            human_reviews = sum(item.get("human_reviewer_count", 0) for item in stats)
+            bot_reviews = sum(item.get("bot_review_events", 0) for item in stats)
+            if human_reviews < human_threshold:
+                continue
+            ratio = human_reviews / max(bot_reviews or 1, 1)
+            if ratio >= ratio_threshold:
+                teams = defaultdict(int)
+                for item in stats:
+                    for team, count in (item.get("human_reviewer_teams") or {}).items():
+                        teams[team] += count
+                drifts.append(
+                    {
+                        "agent_id": agent,
+                        "human_reviewers": human_reviews,
+                        "bot_reviews": bot_reviews,
+                        "ratio": ratio,
+                        "human_reviewer_teams": dict(sorted(teams.items(), key=lambda item: item[1], reverse=True)),
+                    }
+                )
+        drifts.sort(key=lambda item: item["ratio"], reverse=True)
+        return drifts
+
+    def ci_failure_heatmap(
+        self,
+        time_window: str,
+        *,
+        agent_id: str | None = None,
+        limit: int = 25,
+    ) -> list[dict]:
+        window = _parse_window(time_window)
+        window_end = _now()
+        window_start = window_end - window
+        analyses = self._filter_analyses(window_start)
+        _, _, review_stats_by_agent = self._collect_window_data(analyses, agent_id)
+        heatmap: list[dict] = []
+        aggregate: defaultdict[tuple[str, str], int] = defaultdict(int)
+        for agent, stats in review_stats_by_agent.items():
+            for item in stats:
+                failed_names = item.get("ci_failed_check_names")
+                if isinstance(failed_names, dict):
+                    iterator = failed_names.items()
+                elif isinstance(failed_names, list):
+                    iterator = ((name, 1) for name in failed_names)
+                else:
+                    iterator = ()
+                for name, count in iterator:
+                    aggregate[(agent, name)] += count
+        sorted_entries = sorted(aggregate.items(), key=lambda kv: kv[1], reverse=True)
+        for (agent_key, name), count in sorted_entries[:limit]:
+            heatmap.append({"agent_id": agent_key, "name": name, "count": count})
+        return heatmap
 
     def _compute_provenance_coverage(
         self,

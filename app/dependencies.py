@@ -38,12 +38,16 @@ def get_event_sink() -> EventSink:
 
 @lru_cache
 def get_analytics_service() -> AnalyticsService:
-    return AnalyticsService(get_store(), sink=get_event_sink())
+    return AnalyticsService(
+        get_store(),
+        sink=get_event_sink(),
+        team_budgets=settings.github_team_review_budgets,
+    )
 
 
 @lru_cache
 def get_governance_service() -> GovernanceService:
-    return GovernanceService()
+    return GovernanceService(get_event_sink())
 
 
 @lru_cache
