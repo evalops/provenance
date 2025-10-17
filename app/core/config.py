@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     github_reviewer_team_map: dict[str, str] = Field(default_factory=dict)
     github_team_review_budgets: dict[str, int] = Field(default_factory=dict)
     agent_public_keys: dict[str, str] = Field(default_factory=dict)
+    clickhouse_url: str | None = None
+    clickhouse_database: str | None = None
+    clickhouse_user: str | None = None
+    clickhouse_password: str | None = None
 
     model_config = SettingsConfigDict(env_prefix="provenance_", env_file=".env", extra="ignore")
 

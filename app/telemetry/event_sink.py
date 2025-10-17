@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+import requests
+
 from app.core.config import settings
 
 
@@ -180,6 +182,64 @@ class SnowflakeEventSink:
             return
 
 
+class ClickHouseEventSink:
+    """Writes events into ClickHouse via the HTTP interface."""
+
+    def __init__(
+        self,
+        url: str,
+        table: str,
+        *,
+        database: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        batch_size: int = 25,
+    ) -> None:
+        self._url = url.rstrip("/")
+        self._table = table
+        self._database = database
+        self._batch_size = max(batch_size, 1)
+        self._auth = (user, password) if user and password else None
+        self._buffer: list[str] = []
+        self._lock = threading.Lock()
+        self._session = requests.Session()
+
+    def _table_reference(self) -> str:
+        if self._database and "." not in self._table:
+            return f"{self._database}.{self._table}"
+        return self._table
+
+    def publish(self, event: dict) -> None:
+        payload = json.dumps(event, separators=(",", ":"), sort_keys=True)
+        with self._lock:
+            self._buffer.append(payload)
+            if len(self._buffer) >= self._batch_size:
+                self._flush_locked()
+
+    def close(self) -> None:
+        with self._lock:
+            self._flush_locked()
+        self._session.close()
+
+    def _flush_locked(self) -> None:
+        if not self._buffer:
+            return
+        data = "\n".join(self._buffer)
+        query = f"INSERT INTO {self._table_reference()} FORMAT JSONEachRow\n{data}\n"
+        params = {"database": self._database} if self._database and "." not in self._table else None
+        response = self._session.post(
+            self._url,
+            params=params,
+            data=query.encode("utf-8"),
+            auth=self._auth,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"ClickHouse insert failed ({response.status_code}): {response.text}")
+        self._buffer.clear()
+
+
 def sink_from_settings() -> EventSink:
     """Factory to construct an event sink based on app settings."""
 
@@ -217,6 +277,17 @@ def sink_from_settings() -> EventSink:
             table=settings.timeseries_table,
             warehouse=settings.timeseries_warehouse,
             role=settings.timeseries_role,
+            batch_size=settings.timeseries_batch_size,
+        )
+    if backend == "clickhouse":
+        if not (settings.clickhouse_url and settings.timeseries_table):
+            raise ValueError("ClickHouse backend requires PROVENANCE_CLICKHOUSE_URL and PROVENANCE_TIMESERIES_TABLE")
+        return ClickHouseEventSink(
+            url=settings.clickhouse_url,
+            table=settings.timeseries_table,
+            database=settings.clickhouse_database,
+            user=settings.clickhouse_user,
+            password=settings.clickhouse_password,
             batch_size=settings.timeseries_batch_size,
         )
     if backend in {"off", "none", "disabled"}:

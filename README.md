@@ -59,7 +59,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_RISK_HIGH_SEVERITY_THRESHOLD` | Number of high-severity findings before issuing a warn | `1` |
 | `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` | Default lookback window for analytics | `7d` |
 | `PROVENANCE_SEMGREP_CONFIG_PATH` | Override path/URL for Semgrep configuration | *(bundled rules)* |
-| `PROVENANCE_TIMESERIES_BACKEND` | Backend for analytics event export (`file`, `bigquery`, `snowflake`, `off`) | `file` |
+| `PROVENANCE_TIMESERIES_BACKEND` | Backend for analytics event export (`file`, `bigquery`, `snowflake`, `clickhouse`, `off`) | `file` |
 | `PROVENANCE_TIMESERIES_PATH` | File path for JSONL events when using `file` backend | `data/timeseries_events.jsonl` |
 | `PROVENANCE_TIMESERIES_PROJECT` | Cloud project/account for warehouse exports | *(unset)* |
 | `PROVENANCE_TIMESERIES_DATABASE` | Warehouse database name (Snowflake only) | *(unset)* |
@@ -86,6 +86,10 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_REVIEWER_TEAM_MAP` | JSON map of reviewer logins to team names for cohort reporting | `{}` |
 | `PROVENANCE_TEAM_REVIEW_BUDGETS` | JSON map of team names to max expected human review counts per window | `{}` |
 | `PROVENANCE_AGENT_PUBLIC_KEYS` | JSON map of agent IDs to base64 Ed25519 public keys for attestation verification | `{}` |
+| `PROVENANCE_CLICKHOUSE_URL` | ClickHouse HTTP endpoint for analytics export (when backend=`clickhouse`) | *(unset)* |
+| `PROVENANCE_CLICKHOUSE_DATABASE` | ClickHouse database name (optional if table already qualified) | `provenance` |
+| `PROVENANCE_CLICKHOUSE_USER` | ClickHouse user for authenticated writes | *(unset)* |
+| `PROVENANCE_CLICKHOUSE_PASSWORD` | ClickHouse password for authenticated writes | *(unset)* |
 
 ## Detection Pipeline
 
@@ -182,6 +186,12 @@ The same process works against forks or sandboxes—helpful when validating new 
 - Install observability exporters via `uv sync --group observability` when enabling OTLP (install `opentelemetry-exporter-otlp`). For Prometheus support, install `opentelemetry-exporter-prometheus` manually.
 - Set `PROVENANCE_OTEL_ENABLED=true` to emit OpenTelemetry metrics (currently using the console exporter by default).
 - Event payloads include per-agent code volume, churn rates, complexity heuristics, and counts by finding category/severity.
+
+### ClickHouse quickstart
+
+- Run `make clickhouse-up` to launch a local ClickHouse instance with the starter schema from `infrastructure/clickhouse/schema.sql`.
+- Configure `PROVENANCE_TIMESERIES_BACKEND=clickhouse`, `PROVENANCE_CLICKHOUSE_URL=http://localhost:8123`, and `PROVENANCE_TIMESERIES_TABLE=analysis_events` (or point at your own table) to mirror analytics events into ClickHouse.
+- Downstream jobs can query the `provenance` database (tables: `analysis_events`, `findings`, `review_events`) for long-horizon reporting while Redis continues to serve hot state.
 
 ## Dashboard
 
