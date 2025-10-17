@@ -72,6 +72,32 @@ class GovernanceService:
             "coverage": coverage,
         }
 
+        metadata = record.provenance_inputs.get("github_metadata", {}) if isinstance(record.provenance_inputs, dict) else {}
+        review_summary = metadata.get("review_summary") or {}
+        commit_summary = metadata.get("commit_summary") or {}
+
+        bot_override_count = review_summary.get("bot_block_overrides", 0)
+        bot_block_resolved = review_summary.get("bot_block_resolved", 0)
+        force_push_after_approval = commit_summary.get("force_push_after_approval") is True or review_summary.get("force_push_after_approval_count", 0) > 0
+
+        if bot_override_count:
+            outcome = PolicyOutcome.BLOCK if settings.provenance_block_on_unknown else PolicyOutcome.WARN
+            rationale = (
+                f"Detected {bot_override_count} bot review(s) requesting changes that were bypassed by merge"
+            )
+            if bot_block_resolved:
+                rationale += f" ({bot_block_resolved} subsequently resolved)"
+
+        elif force_push_after_approval and outcome != PolicyOutcome.BLOCK:
+            outcome = PolicyOutcome.WARN
+            rationale = "Force-push occurred after approval; requires manual verification."
+
+        if bot_override_count or force_push_after_approval:
+            evidence_links.append("provenance:github_review")
+            risk_summary["bot_block_overrides"] = bot_override_count
+            risk_summary["bot_block_resolved"] = bot_block_resolved
+            risk_summary["force_push_after_approval"] = bool(force_push_after_approval)
+
         return PolicyDecision(
             decision_id=new_decision_id(),
             analysis_id=record.analysis_id,

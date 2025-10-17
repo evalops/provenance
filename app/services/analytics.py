@@ -403,6 +403,8 @@ class AnalyticsService:
                         association_counts[assoc] += 1
                         if (profile.get("type") or "").lower() != "bot":
                             human_reviewer_count += 1
+                    if not human_reviewer_count:
+                        human_reviewer_count = summary.get("human_reviewer_count", 0)
                     failed_check_names = [
                         run.get("name")
                         for run in ci_summary.get("check_runs") or []
@@ -715,6 +717,53 @@ class AnalyticsService:
                 )
             )
         return AnalyticsSeries(metric="risk_rate", group_by="agent_id", data=sorted(points, key=lambda p: p.agent_id))
+
+    def detect_review_alerts(self, time_window: str, *, threshold: int = 1) -> list[dict]:
+        """Return agents with risky GitHub review patterns (bot overrides, force pushes)."""
+        window = _parse_window(time_window)
+        window_end = _now()
+        window_start = window_end - window
+        analyses = self._filter_analyses(window_start)
+        _, _, review_stats_by_agent = self._collect_window_data(analyses, None)
+        alerts: list[dict] = []
+        for agent, stats in review_stats_by_agent.items():
+            overrides = sum(item.get("bot_block_overrides", 0) for item in stats)
+            force_push_after = sum(1 for item in stats if item.get("force_push_after_approval"))
+            if overrides >= threshold or force_push_after >= threshold:
+                alerts.append(
+                    {
+                        "agent_id": agent,
+                        "bot_block_overrides": overrides,
+                        "force_push_after_approval": force_push_after,
+                        "human_reviewer_count": sum(item.get("human_reviewer_count", 0) for item in stats),
+                        "bot_block_events": sum(item.get("bot_block_events", 0) for item in stats),
+                    }
+                )
+        alerts.sort(key=lambda alert: (alert["bot_block_overrides"], alert["force_push_after_approval"]), reverse=True)
+        return alerts
+
+    def human_vs_bot_load(self, time_window: str) -> list[dict]:
+        """Return comparative human vs bot review load for each agent."""
+        window = _parse_window(time_window)
+        window_end = _now()
+        window_start = window_end - window
+        analyses = self._filter_analyses(window_start)
+        _, _, review_stats_by_agent = self._collect_window_data(analyses, None)
+        trend: list[dict] = []
+        for agent, stats in review_stats_by_agent.items():
+            human_reviews = sum(item.get("human_reviewer_count", 0) for item in stats)
+            bot_reviews = sum(item.get("bot_review_events", 0) for item in stats)
+            bot_blocks = sum(item.get("bot_block_events", 0) for item in stats)
+            trend.append(
+                {
+                    "agent_id": agent,
+                    "human_reviewers": human_reviews,
+                    "bot_reviews": bot_reviews,
+                    "bot_block_events": bot_blocks,
+                }
+            )
+        trend.sort(key=lambda entry: entry["agent_id"])
+        return trend
 
     def _compute_provenance_coverage(
         self,

@@ -551,3 +551,67 @@ def test_mttr_and_suppression_metrics():
 
     bot_override_point = next(point for point in bot_override_series.data if point.agent_id == "claude-3-opus")
     assert bot_override_point.value == 0.0
+
+
+def test_review_alert_detection_and_trend():
+    analytics = _bootstrap_store()
+    store = analytics._store  # type: ignore[attr-defined]
+    now = datetime.now(timezone.utc) + timedelta(hours=3)
+
+    override_record = AnalysisRecord(
+        analysis_id="an-override",
+        status=AnalysisStatus.COMPLETED,
+        repo_id="acme/shop",
+        pr_number="103",
+        base_sha="base-3",
+        head_sha="head-3",
+        created_at=now,
+        updated_at=now,
+        provenance_inputs={
+            "changed_lines": [],
+            "github_metadata": {
+                "review_summary": {
+                    "bot_block_overrides": 2,
+                    "bot_block_resolved": 1,
+                    "bot_review_events": 3,
+                    "bot_block_events": 2,
+                    "bot_reviewer_count": 2,
+                    "bot_comment_count": 4,
+                    "human_reviewer_count": 1,
+                },
+                "commit_summary": {
+                    "force_push_after_approval": False,
+                },
+            },
+        },
+    )
+    store.create_analysis(override_record)
+    store.add_changed_lines(
+        override_record.analysis_id,
+        [
+            ChangedLine(
+                analysis_id=override_record.analysis_id,
+                repo_id=override_record.repo_id,
+                pr_number=override_record.pr_number,
+                head_sha=override_record.head_sha,
+                file_path="services/orders.py",
+                line_number=1,
+                change_type=ChangeType.ADDED,
+                timestamp=now,
+                branch="feature/override",
+                language="python",
+                content="value = 1",
+                attribution=ProvenanceAttribution(agent=AgentIdentity(agent_id="override-bot")),
+            )
+        ],
+    )
+
+    alerts = analytics.detect_review_alerts(time_window="2d")
+    override_alert = next(alert for alert in alerts if alert["agent_id"] == "override-bot")
+    assert override_alert["bot_block_overrides"] == 2
+    assert override_alert["force_push_after_approval"] == 0
+
+    trend = analytics.human_vs_bot_load(time_window="2d")
+    override_trend = next(item for item in trend if item["agent_id"] == "override-bot")
+    assert override_trend["bot_reviews"] == 3
+    assert override_trend["human_reviewers"] == 1
