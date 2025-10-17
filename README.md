@@ -222,6 +222,9 @@ The same process works against forks or sandboxes—helpful when validating new 
 ## Additional Documentation
 
 - [CI Integration Guide](docs/ci-integration.md) – Configure GitHub Actions, upload SARIF, archive decision bundles, and adapt the workflow to other CI systems.
+- [Governance & Risk Model](docs/governance-and-risk-model.md) – Understand decision flow, thresholds, and tuning guidance.
+- [Configuration Reference](docs/configuration.md) – Environment variables grouped by subsystem with defaults and usage tips.
+- [Detector Authoring Guide](docs/detector-authoring.md) – Build custom detectors, register modules, and manage rule packs.
 - [SARIF Reporting](docs/sarif-reporting.md) – Understand the SARIF 2.1.0 output, severity mapping, and customization hooks.
 - [DSSE Decision Bundles](docs/dsse-decision-bundles.md) – Inspect the envelope schema, verify signatures, and integrate with transparency logs.
 
