@@ -135,6 +135,7 @@ spec:
 - Package the chart with `make helm-package`; artifacts land in `dist/charts/provenance-<version>.tgz`.
 - Publish to GitHub Pages (`helm repo index dist/charts --url ...`) or push to an OCI registry (`helm push provenance-<version>.tgz oci://ghcr.io/<org>/charts`).
 - Remember to bump `charts/provenance/Chart.yaml` when chart features change.
+- Use the `Release Helm Chart` GitHub Action (`.github/workflows/release-chart.yml`) to package and publish to `ghcr.io/<owner>/charts` via the GitHub UI or `gh workflow run`.
 
 ## Scaling Considerations
 

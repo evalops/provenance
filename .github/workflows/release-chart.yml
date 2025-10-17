@@ -1,0 +1,57 @@
+name: Release Helm Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version (matches charts/provenance/Chart.yaml)"
+        required: true
+      app_version:
+        description: "App version override (optional)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CHART_DIR: charts/provenance
+  CHART_NAME: provenance
+  OCI_REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
+
+jobs:
+  package-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set chart version
+        if: ${{ inputs.version != '' }}
+        run: |
+          yq -i '.version = "${{ inputs.version }}"' $CHART_DIR/Chart.yaml
+          if [ -n "${{ inputs.app_version }}" ]; then
+            yq -i '.appVersion = "${{ inputs.app_version }}"' $CHART_DIR/Chart.yaml
+          fi
+
+      - name: Confirm chart version
+        run: yq '.version' $CHART_DIR/Chart.yaml
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Package chart
+        run: |
+          helm dependency update $CHART_DIR || true
+          helm package $CHART_DIR --destination dist/charts
+
+      - name: Publish chart to OCI
+        run: |
+          CHART_PACKAGE=$(ls dist/charts/${CHART_NAME}-*.tgz)
+          helm push "$CHART_PACKAGE" oci://$OCI_REGISTRY
+
+      - name: Upload packaged chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: dist/charts

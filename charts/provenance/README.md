@@ -70,3 +70,16 @@ Or push to an OCI registry:
 helm package charts/provenance
 helm push provenance-<version>.tgz oci://ghcr.io/your-org/charts
 ```
+
+### GitHub Actions Release Workflow
+
+Trigger `.github/workflows/release-chart.yml` to package the chart and publish it to `ghcr.io/<owner>/charts`:
+
+```bash
+gh workflow run "Release Helm Chart" \
+  --ref main \
+  --field version=0.3.0 \
+  --field app_version=1.0.0
+```
+
+The workflow can also be started from the GitHub UI (Actions → Release Helm Chart). Packaged artifacts are uploaded to the workflow run in addition to the push to the OCI registry.
