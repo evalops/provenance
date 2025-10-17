@@ -84,6 +84,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `PROVENANCE_GITHUB_AGENT_LABEL_PREFIX` | PR label prefix used to infer agent IDs | `agent:` |
 | `PROVENANCE_GITHUB_CACHE_TTL_SECONDS` | Cache TTL (seconds) for GitHub metadata lookups | `300` |
 | `PROVENANCE_GITHUB_AGENT_MAP` | JSON map of GitHub logins/keywords to agent IDs | `{}` |
+| `PROVENANCE_GITHUB_REVIEWER_TEAM_MAP` | JSON map of reviewer logins to team names for cohort reporting | `{}` |
 
 ## Detection with Semgrep
 
@@ -150,6 +151,8 @@ Example ingestion payload:
 - `/v1/analytics/summary` now surfaces GitHub-aware metrics alongside the existing risk/volume suite: `code_volume`, `code_churn_rate`, `avg_line_complexity`, `agent_response_rate`, `agent_response_p50_hours`, `agent_response_p90_hours`, `reopened_threads`, `force_push_events`, `rewrite_loops`, `human_followup_commits`, `human_followup_fast`, `ci_time_to_green_hours`, `ci_failed_checks`, `agent_commit_ratio`, `commit_lead_time_hours`, `force_push_after_approval`, `human_reviewer_count`, `avg_human_reviewers`, `avg_unique_reviewers`, `bot_review_events`, `bot_block_events`, `bot_block_overrides`, `bot_block_resolved`, `bot_reviewer_count`, `bot_informational_only_reviewer_count`, `bot_comment_count`, and `classification_<label>_count` (e.g., `classification_security_count`).
 - `/v1/analytics/agents/behavior` returns composite snapshots that now blend code/finding metrics with review conversation health (thread counts, response latency, classification breakdowns), CI friction (failures, time-to-green), commit dynamics (force pushes, rewrite loops, human follow-ups), and attention heatmaps (top paths + hot files) per agent.
 - Snapshots also include reviewer cohort context (`human_reviewer_count`, association breakdowns), bot review behavior (`bot_block_events`, `bot_block_overrides`), provenance anomalies (`force_push_after_approval_count`), and CI failure taxonomy (failing check names and contexts) to highlight operational hotspots.
+- `/v1/analytics/review-alerts` highlights agents/analyses where bot change-requests were overridden or force-pushes occurred post-approval.
+- `/v1/analytics/review-load` reports human vs. bot review load per agent, while `/v1/analytics/review-load/teams` aggregates human reviewer effort by the configured team map.
 - Review-focused metrics (`review_comments`, `unique_reviewers`, `review_events`, `agent_comment_mentions`) continue to leverage GitHub PR data when credentials are supplied; classification metrics reflect the resolver's heuristic labeling of each conversation snippet.
 - Use `PROVENANCE_ANALYTICS_DEFAULT_WINDOW` or query parameters such as `?time_window=14d` to track longer horizons and compare agents.
 

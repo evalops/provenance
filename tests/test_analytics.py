@@ -373,6 +373,7 @@ def test_agent_behavior_report_highlights_top_categories():
     assert claude_snapshot.force_push_after_approval_count == 1
     assert claude_snapshot.ci_failed_check_names == {"lint": 1}
     assert claude_snapshot.ci_failure_contexts == {"deploy-ci": 1}
+    assert claude_snapshot.human_reviewer_teams == {}
     assert claude_snapshot.bot_review_events == 0
     assert claude_snapshot.bot_block_events == 0
     assert claude_snapshot.bot_informational_events == 0
@@ -416,6 +417,7 @@ def test_agent_behavior_report_highlights_top_categories():
     assert copilot_snapshot.force_push_after_approval_count == 0
     assert copilot_snapshot.ci_failed_check_names == {}
     assert copilot_snapshot.ci_failure_contexts == {}
+    assert copilot_snapshot.human_reviewer_teams == {}
     assert copilot_snapshot.bot_review_events == 0
     assert copilot_snapshot.bot_block_events == 0
     assert copilot_snapshot.bot_informational_events == 0
@@ -552,6 +554,11 @@ def test_mttr_and_suppression_metrics():
     bot_override_point = next(point for point in bot_override_series.data if point.agent_id == "claude-3-opus")
     assert bot_override_point.value == 0.0
 
+    load_entries = analytics.human_vs_bot_load(time_window="1d")
+    claude_load = next(entry for entry in load_entries if entry["agent_id"] == "claude-3-opus")
+    assert "human_reviewer_teams" in claude_load
+    assert claude_load["human_reviewer_teams"] == {}
+
 
 def test_review_alert_detection_and_trend():
     analytics = _bootstrap_store()
@@ -615,3 +622,7 @@ def test_review_alert_detection_and_trend():
     override_trend = next(item for item in trend if item["agent_id"] == "override-bot")
     assert override_trend["bot_reviews"] == 3
     assert override_trend["human_reviewers"] == 1
+    assert override_trend["human_reviewer_teams"] == {}
+
+    team_load = analytics.team_review_load(time_window="2d")
+    assert team_load == []

@@ -186,3 +186,47 @@ def test_category_thresholds_override(monkeypatch):
 
     decision_block = service.evaluate(record, [line], findings)
     assert decision_block.outcome.value == "block"
+
+
+def test_bot_override_triggers_warn(monkeypatch):
+    settings = Settings()
+    monkeypatch.setattr("app.services.governance.settings", settings)
+    service = GovernanceService()
+    record = _baseline_record()
+    record.provenance_inputs = {
+        "github_metadata": {
+            "review_summary": {
+                "bot_block_overrides": 2,
+                "bot_block_resolved": 1,
+            },
+            "commit_summary": {
+                "force_push_after_approval": False,
+            },
+        }
+    }
+
+    decision = service.evaluate(record, [], [])
+    assert decision.outcome.value == "warn"
+    assert decision.risk_summary["bot_block_overrides"] == 2
+    assert decision.risk_summary["bot_block_resolved"] == 1
+
+
+def test_bot_override_blocks_when_policy_enabled(monkeypatch):
+    settings = Settings(provenance_block_on_unknown=True)
+    monkeypatch.setattr("app.services.governance.settings", settings)
+    service = GovernanceService()
+    record = _baseline_record()
+    record.provenance_inputs = {
+        "github_metadata": {
+            "review_summary": {
+                "bot_block_overrides": 1,
+            },
+            "commit_summary": {
+                "force_push_after_approval": True,
+            },
+        }
+    }
+
+    decision = service.evaluate(record, [], [])
+    assert decision.outcome.value == "block"
+    assert decision.risk_summary["force_push_after_approval"] is True

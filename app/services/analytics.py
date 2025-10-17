@@ -8,6 +8,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 import re
 
+from app.core.config import settings
 from app.models.analytics import AnalyticsSeries, MetricPoint, AgentBehaviorReport, AgentBehaviorSnapshot
 from app.models.domain import AnalysisRecord, ChangedLine, Finding, ChangeType, FindingStatus
 from app.repositories.redis_store import RedisWarehouse
@@ -43,6 +44,7 @@ class AnalyticsService:
     def __init__(self, store: RedisWarehouse, sink: EventSink | None = None) -> None:
         self._store = store
         self._sink = sink or NullEventSink()
+        self._team_map = {k.lower(): v for k, v in settings.github_reviewer_team_map.items()}
 
     def index_analysis(
         self,
@@ -224,6 +226,7 @@ class AnalyticsService:
             failure_name_counts = defaultdict(int)
             failure_context_counts = defaultdict(int)
             force_push_after_count = sum(1 for stat in review_stats if stat.get("force_push_after_approval"))
+            team_totals = defaultdict(int)
             for stat in review_stats:
                 for assoc, count in (stat.get("reviewer_association_breakdown") or {}).items():
                     association_counts[assoc] += count
@@ -233,6 +236,8 @@ class AnalyticsService:
                 for context in stat.get("ci_failure_contexts", []):
                     if context:
                         failure_context_counts[context] += 1
+                for team, count in (stat.get("human_reviewer_teams") or {}).items():
+                    team_totals[team] += count
 
             agent_response_rate = statistics.fmean(response_rates) if response_rates else 0.0
             agent_response_p50 = statistics.median(response_p50_values) if response_p50_values else None
@@ -297,6 +302,7 @@ class AnalyticsService:
                     bot_blocking_reviewer_count=bot_blocking_reviewer_total,
                     bot_informational_only_reviewer_count=bot_informational_only_total,
                     bot_comment_count=bot_comment_total,
+                    human_reviewer_teams=dict(sorted(team_totals.items(), key=lambda item: item[1], reverse=True)),
                     top_paths=top_paths,
                     hot_files=hot_files,
                 )
@@ -398,11 +404,26 @@ class AnalyticsService:
                     reviewer_profiles = summary.get("reviewer_profiles") or []
                     association_counts = defaultdict(int)
                     human_reviewer_count = 0
+                    team_counts = defaultdict(int)
                     for profile in reviewer_profiles:
                         assoc = (profile.get("association") or "unknown").lower()
                         association_counts[assoc] += 1
-                        if (profile.get("type") or "").lower() != "bot":
+                        is_bot = (profile.get("type") or "").lower() == "bot" or profile.get("is_bot")
+                        team = profile.get("team")
+                        login = profile.get("login")
+                        if not team and login:
+                            team = self._team_map.get(login.lower())
+                            if team:
+                                profile["team"] = team
+                        if not is_bot:
                             human_reviewer_count += 1
+                            if team:
+                                team_counts[team] += 1
+                    if not human_reviewer_count:
+                        human_reviewer_count = summary.get("human_reviewer_count", 0)
+                    human_reviewer_teams = dict(team_counts)
+                    if not human_reviewer_teams and summary.get("human_reviewer_teams"):
+                        human_reviewer_teams = summary.get("human_reviewer_teams")
                     if not human_reviewer_count:
                         human_reviewer_count = summary.get("human_reviewer_count", 0)
                     failed_check_names = [
@@ -448,7 +469,12 @@ class AnalyticsService:
                         "human_reviewer_count": human_reviewer_count,
                         "reviewer_profiles": reviewer_profiles,
                         "reviewer_association_breakdown": dict(association_counts),
+                        "human_reviewer_teams": human_reviewer_teams,
+                        "last_merge_actor": summary.get("last_merge_actor") or timeline_summary.get("last_merge_actor"),
+                        "last_merge_at": summary.get("last_merge_at") or timeline_summary.get("last_merge_at"),
                     }
+                    if summary.get("bot_block_override_details"):
+                        combined_summary["bot_block_override_details"] = summary["bot_block_override_details"]
                     classification_breakdown = summary.get("classification_breakdown") or {}
                     combined_summary["classification_breakdown"] = classification_breakdown
                     for label, count in classification_breakdown.items():
@@ -730,6 +756,7 @@ class AnalyticsService:
             overrides = sum(item.get("bot_block_overrides", 0) for item in stats)
             force_push_after = sum(1 for item in stats if item.get("force_push_after_approval"))
             if overrides >= threshold or force_push_after >= threshold:
+                latest = stats[-1] if stats else {}
                 alerts.append(
                     {
                         "agent_id": agent,
@@ -737,6 +764,9 @@ class AnalyticsService:
                         "force_push_after_approval": force_push_after,
                         "human_reviewer_count": sum(item.get("human_reviewer_count", 0) for item in stats),
                         "bot_block_events": sum(item.get("bot_block_events", 0) for item in stats),
+                        "merge_actor": latest.get("last_merge_actor"),
+                        "merged_at": latest.get("last_merge_at"),
+                        "override_details": latest.get("bot_block_override_details", []),
                     }
                 )
         alerts.sort(key=lambda alert: (alert["bot_block_overrides"], alert["force_push_after_approval"]), reverse=True)
@@ -754,16 +784,38 @@ class AnalyticsService:
             human_reviews = sum(item.get("human_reviewer_count", 0) for item in stats)
             bot_reviews = sum(item.get("bot_review_events", 0) for item in stats)
             bot_blocks = sum(item.get("bot_block_events", 0) for item in stats)
+            team_totals = defaultdict(int)
+            for item in stats:
+                for team, count in (item.get("human_reviewer_teams") or {}).items():
+                    team_totals[team] += count
             trend.append(
                 {
                     "agent_id": agent,
                     "human_reviewers": human_reviews,
                     "bot_reviews": bot_reviews,
                     "bot_block_events": bot_blocks,
+                    "human_reviewer_teams": dict(sorted(team_totals.items(), key=lambda item: item[1], reverse=True)),
                 }
             )
         trend.sort(key=lambda entry: entry["agent_id"])
         return trend
+
+    def team_review_load(self, time_window: str) -> list[dict]:
+        """Aggregate human reviewer counts by mapped team across all agents."""
+        window = _parse_window(time_window)
+        window_end = _now()
+        window_start = window_end - window
+        analyses = self._filter_analyses(window_start)
+        _, _, review_stats_by_agent = self._collect_window_data(analyses, None)
+        team_totals = defaultdict(int)
+        for stats in review_stats_by_agent.values():
+            for item in stats:
+                for team, count in (item.get("human_reviewer_teams") or {}).items():
+                    team_totals[team] += count
+        return [
+            {"team": team, "human_reviewers": count}
+            for team, count in sorted(team_totals.items(), key=lambda item: item[1], reverse=True)
+        ]
 
     def _compute_provenance_coverage(
         self,

@@ -65,6 +65,7 @@ class GitHubProvenanceResolver:
         agent_label_prefix: str = "agent:",
         cache_ttl_seconds: int = 300,
         agent_map: dict[str, str] | None = None,
+        reviewer_team_map: dict[str, str] | None = None,
     ) -> None:
         self._agent_label_prefix = agent_label_prefix.lower()
         auth = Token(token)
@@ -74,6 +75,7 @@ class GitHubProvenanceResolver:
             self._client = Github(auth=auth)
         self._cache_ttl = max(cache_ttl_seconds, 30)
         self._agent_map = {k.lower(): v for k, v in (agent_map or {}).items()}
+        self._reviewer_team_map = {k.lower(): v for k, v in (reviewer_team_map or {}).items()}
         self._commit_cache: dict[tuple[str, str], tuple[float, Optional[Commit.Commit]]] = {}
         self._label_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
         self._comment_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
@@ -176,6 +178,7 @@ class GitHubProvenanceResolver:
         bot_blocking_reviewers: set[str] = set()
         bot_block_overrides = 0
         bot_block_resolved = 0
+        override_details: list[dict] = []
         for review_entry in reviews_list:
             if not review_entry.get("is_bot"):
                 continue
@@ -198,16 +201,28 @@ class GitHubProvenanceResolver:
                     if later_entry.get("state") in {"APPROVED", "DISMISSED"}:
                         resolved = True
                         break
+            detail = {
+                "bot": login,
+                "submitted_at": review_entry.get("submitted_at"),
+                "state": review_entry.get("state"),
+                "merge_actor": timeline_summary.get("last_merge_actor"),
+                "merged_at": timeline_summary.get("last_merge_at"),
+            }
             if resolved:
                 bot_block_resolved += 1
+                detail["resolved"] = True
             elif merged_at:
                 bot_block_overrides += 1
+                detail["resolved"] = False
+            override_details.append(detail)
 
         conversation_summary["bot_reviewer_count"] = len(bot_reviewers)
         conversation_summary["bot_blocking_reviewer_count"] = len(bot_blocking_reviewers)
         conversation_summary["bot_informational_only_reviewer_count"] = len(bot_reviewers - bot_blocking_reviewers)
         conversation_summary["bot_block_overrides"] = bot_block_overrides
         conversation_summary["bot_block_resolved"] = bot_block_resolved
+        if override_details:
+            conversation_summary["bot_block_override_details"] = override_details
 
         commit_summary = self._summarize_commits(
             pr,
@@ -468,6 +483,17 @@ class GitHubProvenanceResolver:
         reviewer_identities = self._merge_identities(
             comments_info.reviewer_identities, reviews_info.reviewer_identities
         )
+        human_team_counts = defaultdict(int)
+        for profile in reviewer_identities.values():
+            if profile.get("is_bot"):
+                continue
+            login = profile.get("login")
+            team = profile.get("team")
+            if not team and login:
+                team = self._reviewer_team_map.get(login.lower())
+            if team:
+                human_team_counts[team] += 1
+                profile["team"] = team
 
         created_at = getattr(pr, "created_at", None)
         merged_at = getattr(pr, "merged_at", None)
@@ -489,6 +515,7 @@ class GitHubProvenanceResolver:
             "bot_block_events": reviews_info.bot_block_events,
             "bot_informational_events": reviews_info.bot_informational_events,
             "bot_approval_events": reviews_info.bot_approval_events,
+            "human_reviewer_teams": dict(human_team_counts),
         }
 
         if thread_metrics["response_latencies"]:
@@ -768,6 +795,13 @@ class GitHubProvenanceResolver:
         association = getattr(source_obj, "author_association", None)
         profile["association"] = association
         profile["is_bot"] = self._is_bot_login(login) or (profile.get("type") or "").lower() == "bot"
+        team = None
+        if login:
+            team = self._reviewer_team_map.get(login.lower())
+        if not team and profile.get("company"):
+            team = profile.get("company")
+        if team:
+            profile["team"] = team
         return profile
 
     @staticmethod
@@ -859,6 +893,7 @@ class GitHubProvenanceResolver:
                 data["summary"]["last_reopen_at"] = created_iso
             elif event_type == "merged":
                 data["summary"]["last_merge_at"] = created_iso
+                data["summary"]["last_merge_actor"] = getattr(getattr(item, "actor", None), "login", None)
             elif event_type == "review_requested":
                 data["summary"]["last_review_request_at"] = created_iso
             elif event_type == "ready_for_review" and data["summary"]["ready_for_review_at"] is None:
@@ -876,6 +911,7 @@ class GitHubProvenanceResolver:
             "last_force_push_at": data["summary"]["last_force_push_at"],
             "last_reopen_at": data["summary"]["last_reopen_at"],
             "last_merge_at": data["summary"]["last_merge_at"],
+            "last_merge_actor": data["summary"].get("last_merge_actor"),
             "last_review_request_at": data["summary"]["last_review_request_at"],
             "ready_for_review_at": data["summary"]["ready_for_review_at"],
             "converted_to_draft_at": data["summary"]["converted_to_draft_at"],

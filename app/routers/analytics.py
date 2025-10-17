@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.config import settings
 from app.dependencies import get_analytics_service
-from app.schemas.analytics import AnalyticsSummaryResponse, AgentBehaviorResponse
+from app.schemas.analytics import (
+    AnalyticsSummaryResponse,
+    AgentBehaviorResponse,
+    ReviewAlertResponse,
+    ReviewLoadResponse,
+    TeamReviewLoadResponse,
+)
 from app.services.analytics import AnalyticsService
 
 
@@ -59,3 +65,31 @@ def get_agent_behavior_summary(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return AgentBehaviorResponse(report=report, request_id=f"rq_{uuid.uuid4().hex}")
+
+
+@router.get("/review-alerts", response_model=ReviewAlertResponse)
+def get_review_alerts(
+    time_window: str = Query(..., description="Duration string such as 7d or 24h."),
+    threshold: int = Query(1, ge=1, description="Minimum override/force-push count to surface."),
+    analytics_service: AnalyticsService = Depends(get_analytics_service),
+) -> ReviewAlertResponse:
+    alerts = analytics_service.detect_review_alerts(time_window=time_window, threshold=threshold)
+    return ReviewAlertResponse(alerts=alerts, request_id=f"rq_{uuid.uuid4().hex}")
+
+
+@router.get("/review-load", response_model=ReviewLoadResponse)
+def get_review_load(
+    time_window: str = Query(..., description="Duration string such as 7d or 24h."),
+    analytics_service: AnalyticsService = Depends(get_analytics_service),
+) -> ReviewLoadResponse:
+    load = analytics_service.human_vs_bot_load(time_window=time_window)
+    return ReviewLoadResponse(load=load, request_id=f"rq_{uuid.uuid4().hex}")
+
+
+@router.get("/review-load/teams", response_model=TeamReviewLoadResponse)
+def get_team_review_load(
+    time_window: str = Query(..., description="Duration string such as 7d or 24h."),
+    analytics_service: AnalyticsService = Depends(get_analytics_service),
+) -> TeamReviewLoadResponse:
+    load = analytics_service.team_review_load(time_window=time_window)
+    return TeamReviewLoadResponse(load=load, request_id=f"rq_{uuid.uuid4().hex}")

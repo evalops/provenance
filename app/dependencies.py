@@ -56,6 +56,7 @@ def get_github_resolver() -> GitHubProvenanceResolver | None:
         agent_label_prefix=settings.github_agent_label_prefix,
         cache_ttl_seconds=settings.github_cache_ttl_seconds,
         agent_map=settings.github_agent_map,
+        reviewer_team_map=settings.github_reviewer_team_map,
     )
 
 

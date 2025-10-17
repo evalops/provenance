@@ -29,3 +29,42 @@ class AnalyticsQueryParams(BaseModel):
     group_by: str = Field(..., description="Grouping dimension, e.g. agent_id.")
     category: str | None = Field(None, description="Optional filter for rule category.")
     agent_id: str | None = Field(None, description="Optional filter for specific agent.")
+
+
+class ReviewAlert(BaseModel):
+    agent_id: str
+    bot_block_overrides: int
+    force_push_after_approval: int
+    human_reviewer_count: int
+    bot_block_events: int
+    merge_actor: str | None = None
+    merged_at: str | None = None
+    override_details: list[dict] = Field(default_factory=list)
+
+
+class ReviewAlertResponse(BaseModel):
+    alerts: list[ReviewAlert]
+    request_id: str
+
+
+class ReviewLoadEntry(BaseModel):
+    agent_id: str
+    human_reviewers: int
+    bot_reviews: int
+    bot_block_events: int
+    human_reviewer_teams: dict[str, int] = Field(default_factory=dict)
+
+
+class ReviewLoadResponse(BaseModel):
+    load: list[ReviewLoadEntry]
+    request_id: str
+
+
+class TeamReviewLoadEntry(BaseModel):
+    team: str
+    human_reviewers: int
+
+
+class TeamReviewLoadResponse(BaseModel):
+    load: list[TeamReviewLoadEntry]
+    request_id: str

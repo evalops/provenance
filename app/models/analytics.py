@@ -70,6 +70,8 @@ class AgentBehaviorSnapshot(BaseModel):
     reviewer_association_breakdown: dict[str, int] = Field(
         default_factory=dict, description="Reviewer participation by GitHub association (member, contributor, etc.)."
     )
+    human_reviewer_teams: dict[str, int] = Field(
+        default_factory=dict, description="Human reviewer counts grouped by mapped team.")
     bot_review_events: int = Field(0, description="Total bot-authored review submissions.")
     bot_block_events: int = Field(0, description="Bot reviews that requested changes.")
     bot_informational_events: int = Field(0, description="Bot reviews that left non-blocking feedback.")
