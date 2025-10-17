@@ -82,4 +82,4 @@ gh workflow run "Release Helm Chart" \
   --field app_version=1.0.0
 ```
 
-The workflow can also be started from the GitHub UI (Actions → Release Helm Chart). Packaged artifacts are uploaded to the workflow run in addition to the push to the OCI registry.
+The workflow can also be started from the GitHub UI (Actions → Release Helm Chart). Packaged artifacts are uploaded to the workflow run in addition to the push to the OCI registry. The full release workflow builds and publishes the container image to `ghcr.io/<owner>/provenance`; adjust `values.yaml` or use `--set image.repository=...` to point the chart at your preferred registry.

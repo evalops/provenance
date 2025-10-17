@@ -18,6 +18,7 @@ env:
   CHART_DIR: charts/provenance
   CHART_NAME: provenance
   OCI_REGISTRY: ghcr.io/${{ github.repository_owner }}/charts
+  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/provenance
 
 jobs:
   release:
@@ -59,6 +60,27 @@ jobs:
 
       - name: Helm template
         run: make helm-template
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry (Docker)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPO }}:${{ inputs.version }}
+            ${{ env.IMAGE_REPO }}:latest
+          provenance: false
+          sbom: false
 
       - name: Package chart
         run: |
