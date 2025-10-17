@@ -122,6 +122,7 @@ Copy `.env.example` to `.env` and adjust values locally if you prefer dotenv-sty
 | `/v1/analysis` | `POST` | Submit a pull request (diff + provenance) for asynchronous analysis |
 | `/v1/analysis/{id}` | `GET` | Poll analysis status, findings count, and risk summary snapshot |
 | `/v1/analysis/{id}/decision` | `GET` | Fetch the governance decision (allow/block/warn) with evidence |
+| `/v1/analysis/{id}/bundle` | `GET` | Retrieve the signed DSSE decision bundle |
 | `/v1/analytics/summary` | `GET` | Retrieve aggregated KPIs (risk rate, provenance, volume, churn, complexity, etc.) |
 | `/v1/analytics/agents/behavior` | `GET` | Retrieve composite behavioral snapshots for each agent |
 | `/v1/detectors/capabilities` | `GET` | Enumerate active detectors (Semgrep configs, versions, metadata) |

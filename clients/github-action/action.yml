@@ -1,0 +1,28 @@
+name: Provenance Governance
+description: Collect diff, submit to Provenance API, wait for decision.
+runs:
+  using: "composite"
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v1
+
+    - name: Collect diff and submit analysis
+      shell: bash
+      run: |
+        set -euo pipefail
+        uv run -- python clients/github-action/run.py \
+          --api-url "${{ inputs.api_url }}" \
+          --api-token "${{ inputs.api_token }}" \
+          --repo "${{ github.repository }}" \
+          --pr "${{ github.event.pull_request.number }}" \
+          --head-sha "${{ github.sha }}" \
+          --base-sha "${{ github.event.pull_request.base.sha }}" \
+          --workdir "$GITHUB_WORKSPACE"
+
+inputs:
+  api_url:
+    description: Base URL for the Provenance API (e.g. https://provenance.example.com)
+    required: true
+  api_token:
+    description: API token for authentication
+    required: true
