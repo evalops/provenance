@@ -70,6 +70,16 @@ class AgentBehaviorSnapshot(BaseModel):
     reviewer_association_breakdown: dict[str, int] = Field(
         default_factory=dict, description="Reviewer participation by GitHub association (member, contributor, etc.)."
     )
+    bot_review_events: int = Field(0, description="Total bot-authored review submissions.")
+    bot_block_events: int = Field(0, description="Bot reviews that requested changes.")
+    bot_informational_events: int = Field(0, description="Bot reviews that left non-blocking feedback.")
+    bot_approval_events: int = Field(0, description="Bot approvals recorded in the window.")
+    bot_block_overrides: int = Field(0, description="Bot change requests overridden by merge without subsequent approval.")
+    bot_block_resolved: int = Field(0, description="Bot change requests later satisfied by bot approval/dismissal.")
+    bot_reviewer_count: int = Field(0, description="Unique bot reviewers participating.")
+    bot_blocking_reviewer_count: int = Field(0, description="Unique bots that issued blocking reviews.")
+    bot_informational_only_reviewer_count: int = Field(0, description="Bots that only left informational comments.")
+    bot_comment_count: int = Field(0, description="Bot-authored review comments captured in conversations.")
     ci_run_count: int = Field(0, description="Number of CI runs/checks evaluated.")
     ci_failure_count: int = Field(0, description="Number of failing CI runs/checks.")
     ci_failed_checks: int = Field(0, description="Unique failing CI checks in the window.")

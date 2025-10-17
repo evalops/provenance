@@ -93,6 +93,26 @@ class AnalyticsService:
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="review_events", unit="count")
         if metric == "agent_comment_mentions":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="agent_comment_mentions", unit="count")
+        if metric == "bot_review_events":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_review_events", unit="count")
+        if metric == "bot_block_events":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_block_events", unit="count")
+        if metric == "bot_informational_events":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_informational_events", unit="count")
+        if metric == "bot_approval_events":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_approval_events", unit="count")
+        if metric == "bot_block_overrides":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_block_overrides", unit="count")
+        if metric == "bot_block_resolved":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_block_resolved", unit="count")
+        if metric == "bot_reviewer_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_reviewer_count", unit="count")
+        if metric == "bot_blocking_reviewer_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_blocking_reviewer_count", unit="count")
+        if metric == "bot_informational_only_reviewer_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_informational_only_reviewer_count", unit="count")
+        if metric == "bot_comment_count":
+            return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="bot_comment_count", unit="count")
         if metric == "human_reviewer_count":
             return self._compute_review_metric(analyses, window_start, window_end, agent_id, key="human_reviewer_count", unit="count")
         if metric == "avg_human_reviewers":
@@ -171,6 +191,16 @@ class AnalyticsService:
             agent_mentions = sum(stat.get("agent_comment_mentions", 0) for stat in review_stats)
             reopened_threads = sum(stat.get("reopened_threads", 0) for stat in review_stats)
             comment_threads = sum(stat.get("comment_threads", 0) for stat in review_stats)
+            bot_review_events_total = sum(stat.get("bot_review_events", 0) for stat in review_stats)
+            bot_block_events_total = sum(stat.get("bot_block_events", 0) for stat in review_stats)
+            bot_informational_events_total = sum(stat.get("bot_informational_events", 0) for stat in review_stats)
+            bot_approval_events_total = sum(stat.get("bot_approval_events", 0) for stat in review_stats)
+            bot_block_overrides_total = sum(stat.get("bot_block_overrides", 0) for stat in review_stats)
+            bot_block_resolved_total = sum(stat.get("bot_block_resolved", 0) for stat in review_stats)
+            bot_reviewer_total = sum(stat.get("bot_reviewer_count", 0) for stat in review_stats)
+            bot_blocking_reviewer_total = sum(stat.get("bot_blocking_reviewer_count", 0) for stat in review_stats)
+            bot_informational_only_total = sum(stat.get("bot_informational_only_reviewer_count", 0) for stat in review_stats)
+            bot_comment_total = sum(stat.get("bot_comment_count", 0) for stat in review_stats)
             response_rates = [stat.get("agent_response_rate") for stat in review_stats if stat.get("agent_response_rate") is not None]
             response_p50_values = [stat.get("agent_response_p50_hours") for stat in review_stats if stat.get("agent_response_p50_hours") is not None]
             response_p90_values = [stat.get("agent_response_p90_hours") for stat in review_stats if stat.get("agent_response_p90_hours") is not None]
@@ -257,6 +287,16 @@ class AnalyticsService:
                     force_push_after_approval_count=force_push_after_count,
                     ci_failed_check_names=dict(sorted(failure_name_counts.items(), key=lambda item: item[1], reverse=True)),
                     ci_failure_contexts=dict(sorted(failure_context_counts.items(), key=lambda item: item[1], reverse=True)),
+                    bot_review_events=bot_review_events_total,
+                    bot_block_events=bot_block_events_total,
+                    bot_informational_events=bot_informational_events_total,
+                    bot_approval_events=bot_approval_events_total,
+                    bot_block_overrides=bot_block_overrides_total,
+                    bot_block_resolved=bot_block_resolved_total,
+                    bot_reviewer_count=bot_reviewer_total,
+                    bot_blocking_reviewer_count=bot_blocking_reviewer_total,
+                    bot_informational_only_reviewer_count=bot_informational_only_total,
+                    bot_comment_count=bot_comment_total,
                     top_paths=top_paths,
                     hot_files=hot_files,
                 )
@@ -377,6 +417,16 @@ class AnalyticsService:
                     ]
                     combined_summary = {
                         **summary,
+                        "bot_review_events": summary.get("bot_review_events", 0),
+                        "bot_block_events": summary.get("bot_block_events", 0),
+                        "bot_informational_events": summary.get("bot_informational_events", 0),
+                        "bot_approval_events": summary.get("bot_approval_events", 0),
+                        "bot_block_overrides": summary.get("bot_block_overrides", 0),
+                        "bot_block_resolved": summary.get("bot_block_resolved", 0),
+                        "bot_reviewer_count": summary.get("bot_reviewer_count", 0),
+                        "bot_blocking_reviewer_count": summary.get("bot_blocking_reviewer_count", 0),
+                        "bot_informational_only_reviewer_count": summary.get("bot_informational_only_reviewer_count", 0),
+                        "bot_comment_count": summary.get("bot_comment_count", 0),
                         "ci_run_count": ci_summary.get("run_count", 0),
                         "ci_failure_count": ci_summary.get("failure_count", 0),
                         "ci_time_to_green_hours": ci_summary.get("time_to_green_hours"),

@@ -373,6 +373,16 @@ def test_agent_behavior_report_highlights_top_categories():
     assert claude_snapshot.force_push_after_approval_count == 1
     assert claude_snapshot.ci_failed_check_names == {"lint": 1}
     assert claude_snapshot.ci_failure_contexts == {"deploy-ci": 1}
+    assert claude_snapshot.bot_review_events == 0
+    assert claude_snapshot.bot_block_events == 0
+    assert claude_snapshot.bot_informational_events == 0
+    assert claude_snapshot.bot_approval_events == 0
+    assert claude_snapshot.bot_block_overrides == 0
+    assert claude_snapshot.bot_block_resolved == 0
+    assert claude_snapshot.bot_reviewer_count == 0
+    assert claude_snapshot.bot_blocking_reviewer_count == 0
+    assert claude_snapshot.bot_informational_only_reviewer_count == 0
+    assert claude_snapshot.bot_comment_count == 0
     assert claude_snapshot.top_paths == {"services": 3}
     assert claude_snapshot.hot_files == ["services/orders.py"]
 
@@ -406,6 +416,16 @@ def test_agent_behavior_report_highlights_top_categories():
     assert copilot_snapshot.force_push_after_approval_count == 0
     assert copilot_snapshot.ci_failed_check_names == {}
     assert copilot_snapshot.ci_failure_contexts == {}
+    assert copilot_snapshot.bot_review_events == 0
+    assert copilot_snapshot.bot_block_events == 0
+    assert copilot_snapshot.bot_informational_events == 0
+    assert copilot_snapshot.bot_approval_events == 0
+    assert copilot_snapshot.bot_block_overrides == 0
+    assert copilot_snapshot.bot_block_resolved == 0
+    assert copilot_snapshot.bot_reviewer_count == 0
+    assert copilot_snapshot.bot_blocking_reviewer_count == 0
+    assert copilot_snapshot.bot_informational_only_reviewer_count == 0
+    assert copilot_snapshot.bot_comment_count == 0
     assert copilot_snapshot.top_paths == {"web": 3}
     assert copilot_snapshot.hot_files == ["web/forms.ts"]
 
@@ -470,6 +490,9 @@ def test_mttr_and_suppression_metrics():
     force_push_after_series = analytics.query_series(time_window="1d", metric="force_push_after_approval", group_by="agent_id")
     human_followup_fast_series = analytics.query_series(time_window="1d", metric="human_followup_fast", group_by="agent_id")
     avg_unique_reviewer_series = analytics.query_series(time_window="1d", metric="avg_unique_reviewers", group_by="agent_id")
+    bot_review_series = analytics.query_series(time_window="1d", metric="bot_review_events", group_by="agent_id")
+    bot_block_series = analytics.query_series(time_window="1d", metric="bot_block_events", group_by="agent_id")
+    bot_override_series = analytics.query_series(time_window="1d", metric="bot_block_overrides", group_by="agent_id")
 
     mttr_point = next(point for point in mttr_series.data if point.agent_id == "github-copilot")
     assert mttr_point.value == pytest.approx(5.0)
@@ -519,3 +542,12 @@ def test_mttr_and_suppression_metrics():
 
     avg_unique_reviewer_point = next(point for point in avg_unique_reviewer_series.data if point.agent_id == "github-copilot")
     assert avg_unique_reviewer_point.value == pytest.approx(2.0)
+
+    bot_review_point = next(point for point in bot_review_series.data if point.agent_id == "github-copilot")
+    assert bot_review_point.value == 0.0
+
+    bot_block_point = next(point for point in bot_block_series.data if point.agent_id == "github-copilot")
+    assert bot_block_point.value == 0.0
+
+    bot_override_point = next(point for point in bot_override_series.data if point.agent_id == "claude-3-opus")
+    assert bot_override_point.value == 0.0

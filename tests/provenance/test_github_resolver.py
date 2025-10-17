@@ -113,3 +113,8 @@ def test_review_stats(monkeypatch):
     assert stats["reopened_threads"] == 1
     assert stats["approvals"] == 1
     assert stats["comment_threads"] == 2
+    assert stats["bot_review_events"] == 0
+    assert stats["bot_block_events"] == 0
+    assert stats.get("bot_block_overrides", 0) == 0
+    assert stats.get("bot_block_resolved", 0) == 0
+    assert stats.get("bot_reviewer_count", 0) == 0

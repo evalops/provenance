@@ -23,6 +23,7 @@ class ThreadEvent:
     author: str | None
     created_at: datetime | None
     is_agent: bool
+    is_bot: bool = False
 
 
 @dataclass
@@ -33,6 +34,7 @@ class ConversationComments:
     unique_reviewers: set[str]
     agent_mentions: int
     reviewer_identities: dict[str, dict] = field(default_factory=dict)
+    bot_comment_count: int = 0
 
 
 @dataclass
@@ -45,6 +47,11 @@ class ConversationReviews:
     first_review_time: datetime | None
     first_approval_time: datetime | None
     reviewer_identities: dict[str, dict] = field(default_factory=dict)
+    bot_review_events: int = 0
+    bot_block_events: int = 0
+    bot_informational_events: int = 0
+    bot_approval_events: int = 0
+    bot_block_reviews: list[dict] = field(default_factory=list)
 
 
 class GitHubProvenanceResolver:
@@ -163,6 +170,44 @@ class GitHubProvenanceResolver:
             conversation_summary["ready_to_merge_hours"] = self._hours_between(ready_for_review_at, merged_at)
         if first_approval_at and merged_at:
             conversation_summary["approval_to_merge_hours"] = self._hours_between(first_approval_at, merged_at)
+
+        reviews_list = conversation.get("reviews", [])
+        bot_reviewers: set[str] = set()
+        bot_blocking_reviewers: set[str] = set()
+        bot_block_overrides = 0
+        bot_block_resolved = 0
+        for review_entry in reviews_list:
+            if not review_entry.get("is_bot"):
+                continue
+            login = review_entry.get("author")
+            if login:
+                bot_reviewers.add(login)
+            if review_entry.get("state") != "CHANGES_REQUESTED":
+                continue
+            if login:
+                bot_blocking_reviewers.add(login)
+            submitted_at = self._parse_iso(review_entry.get("submitted_at"))
+            resolved = False
+            for later_entry in reviews_list:
+                if later_entry is review_entry:
+                    continue
+                if later_entry.get("author") != login or not later_entry.get("is_bot"):
+                    continue
+                later_time = self._parse_iso(later_entry.get("submitted_at"))
+                if submitted_at and later_time and later_time > submitted_at:
+                    if later_entry.get("state") in {"APPROVED", "DISMISSED"}:
+                        resolved = True
+                        break
+            if resolved:
+                bot_block_resolved += 1
+            elif merged_at:
+                bot_block_overrides += 1
+
+        conversation_summary["bot_reviewer_count"] = len(bot_reviewers)
+        conversation_summary["bot_blocking_reviewer_count"] = len(bot_blocking_reviewers)
+        conversation_summary["bot_informational_only_reviewer_count"] = len(bot_reviewers - bot_blocking_reviewers)
+        conversation_summary["bot_block_overrides"] = bot_block_overrides
+        conversation_summary["bot_block_resolved"] = bot_block_resolved
 
         commit_summary = self._summarize_commits(
             pr,
@@ -439,6 +484,11 @@ class GitHubProvenanceResolver:
             "classification_breakdown": dict(sorted(classification_counts.items(), key=lambda item: item[1], reverse=True)),
             "agent_response_rate": thread_metrics["response_rate"],
             "reviewer_profiles": list(reviewer_identities.values()),
+            "bot_comment_count": comments_info.bot_comment_count,
+            "bot_review_events": reviews_info.bot_review_events,
+            "bot_block_events": reviews_info.bot_block_events,
+            "bot_informational_events": reviews_info.bot_informational_events,
+            "bot_approval_events": reviews_info.bot_approval_events,
         }
 
         if thread_metrics["response_latencies"]:
@@ -476,32 +526,35 @@ class GitHubProvenanceResolver:
         unique_reviewers: set[str] = set()
         agent_mentions = 0
         reviewer_identities: dict[str, dict] = {}
+        bot_comment_count = 0
+
+        def _handle_comment(comment, comment_type: str) -> None:
+            nonlocal agent_mentions, bot_comment_count
+            author_login = getattr(getattr(comment, "user", None), "login", None)
+            profile = self._extract_user_profile(comment, author_login)
+            is_bot = self._is_bot_user(author_login, profile)
+            entry, thread_key, event, classification = self._serialize_comment(
+                comment,
+                comment_type,
+                agent_logins,
+                len(serialized),
+                is_bot=is_bot,
+            )
+            serialized.append(entry)
+            thread_events[thread_key].append(event)
+            classification_counts[classification] += 1
+            if event.author and not event.is_agent:
+                unique_reviewers.add(event.author)
+                reviewer_identities.setdefault(event.author, profile)
+            if AGENT_TRAILER_PATTERN.search(entry["body"]):
+                agent_mentions += 1
+            if is_bot:
+                bot_comment_count += 1
 
         for comment in issue_comments:
-            entry, thread_key, event, classification = self._serialize_comment(
-                comment, "issue_comment", agent_logins, len(serialized)
-            )
-            serialized.append(entry)
-            thread_events[thread_key].append(event)
-            classification_counts[classification] += 1
-            if event.author and not event.is_agent:
-                unique_reviewers.add(event.author)
-                reviewer_identities.setdefault(event.author, self._extract_user_profile(comment, event.author))
-            if AGENT_TRAILER_PATTERN.search(entry["body"]):
-                agent_mentions += 1
-
+            _handle_comment(comment, "issue_comment")
         for comment in review_comments:
-            entry, thread_key, event, classification = self._serialize_comment(
-                comment, "review_comment", agent_logins, len(serialized)
-            )
-            serialized.append(entry)
-            thread_events[thread_key].append(event)
-            classification_counts[classification] += 1
-            if event.author and not event.is_agent:
-                unique_reviewers.add(event.author)
-                reviewer_identities.setdefault(event.author, self._extract_user_profile(comment, event.author))
-            if AGENT_TRAILER_PATTERN.search(entry["body"]):
-                agent_mentions += 1
+            _handle_comment(comment, "review_comment")
 
         normalized_threads = {key: events[:] for key, events in thread_events.items()}
         return ConversationComments(
@@ -511,6 +564,7 @@ class GitHubProvenanceResolver:
             unique_reviewers=unique_reviewers,
             agent_mentions=agent_mentions,
             reviewer_identities=reviewer_identities,
+            bot_comment_count=bot_comment_count,
         )
 
     def _summarize_reviews(
@@ -526,24 +580,31 @@ class GitHubProvenanceResolver:
         first_review_time: datetime | None = None
         first_approval_time: datetime | None = None
         reviewer_identities: dict[str, dict] = {}
+        bot_review_events = 0
+        bot_block_events = 0
+        bot_informational_events = 0
+        bot_approval_events = 0
+        bot_block_reviews: list[dict] = []
 
         for review in reviews:
             submitted_at = getattr(review, "submitted_at", None)
             author_login = getattr(getattr(review, "user", None), "login", None)
+            profile = self._extract_user_profile(review, author_login)
+            is_bot = self._is_bot_user(author_login, profile)
             classification = self._classify_review(review.state, review.body or "")
-            entries.append(
-                {
-                    "author": author_login,
-                    "state": review.state,
-                    "submitted_at": self._coerce_iso(submitted_at),
-                    "body": review.body or "",
-                    "classification": classification,
-                }
-            )
+            entry = {
+                "author": author_login,
+                "state": review.state,
+                "submitted_at": self._coerce_iso(submitted_at),
+                "body": review.body or "",
+                "classification": classification,
+                "is_bot": is_bot,
+            }
+            entries.append(entry)
             classification_counts[classification] += 1
             if author_login and not self._is_agent_login(author_login, agent_logins):
                 unique_reviewers.add(author_login)
-                reviewer_identities.setdefault(author_login, self._extract_user_profile(review, author_login))
+                reviewer_identities.setdefault(author_login, profile)
             if submitted_at and (first_review_time is None or submitted_at < first_review_time):
                 first_review_time = submitted_at
             if review.state == "APPROVED":
@@ -552,6 +613,16 @@ class GitHubProvenanceResolver:
                     first_approval_time = submitted_at
             if review.state == "CHANGES_REQUESTED":
                 requested_changes += 1
+
+            if is_bot:
+                bot_review_events += 1
+                if review.state == "CHANGES_REQUESTED":
+                    bot_block_events += 1
+                    bot_block_reviews.append(entry)
+                elif review.state == "APPROVED":
+                    bot_approval_events += 1
+                else:
+                    bot_informational_events += 1
 
         return ConversationReviews(
             entries=entries,
@@ -562,6 +633,11 @@ class GitHubProvenanceResolver:
             first_review_time=first_review_time,
             first_approval_time=first_approval_time,
             reviewer_identities=reviewer_identities,
+            bot_review_events=bot_review_events,
+            bot_block_events=bot_block_events,
+            bot_informational_events=bot_informational_events,
+            bot_approval_events=bot_approval_events,
+            bot_block_reviews=bot_block_reviews,
         )
 
     def _summarize_threads(
@@ -625,6 +701,8 @@ class GitHubProvenanceResolver:
         comment_type: str,
         agent_logins: set[str],
         index: int,
+        *,
+        is_bot: bool,
     ) -> tuple[dict, str, ThreadEvent, str]:
         body = comment.body or ""
         created_at = getattr(comment, "created_at", None)
@@ -639,6 +717,7 @@ class GitHubProvenanceResolver:
             "classification": classification,
             "created_at": self._coerce_iso(created_at),
             "updated_at": self._coerce_iso(updated_at),
+            "is_bot": is_bot,
         }
         if comment_type == "review_comment":
             serialized["in_reply_to_id"] = getattr(comment, "in_reply_to_id", None)
@@ -648,6 +727,7 @@ class GitHubProvenanceResolver:
             author=author_login,
             created_at=created_at,
             is_agent=self._is_agent_login(author_login, agent_logins),
+            is_bot=is_bot,
         )
         return serialized, thread_key, event, classification
 
@@ -687,6 +767,7 @@ class GitHubProvenanceResolver:
             profile[attr] = getattr(user, attr, None)
         association = getattr(source_obj, "author_association", None)
         profile["association"] = association
+        profile["is_bot"] = self._is_bot_login(login) or (profile.get("type") or "").lower() == "bot"
         return profile
 
     @staticmethod
@@ -944,6 +1025,20 @@ class GitHubProvenanceResolver:
         if lower.endswith("-bot"):
             return True
         return any(keyword in lower for keyword in ("copilot", "claude", "gemini", "gpt", "bard", "llama"))
+
+    @staticmethod
+    def _is_bot_login(login: str | None) -> bool:
+        if not login:
+            return False
+        lower = login.lower()
+        return lower.endswith("[bot]") or lower.endswith("-bot") or lower.endswith("/bot")
+
+    def _is_bot_user(self, login: str | None, profile: dict | None = None) -> bool:
+        if profile and (profile.get("type") or "").lower() == "bot":
+            return True
+        if profile and profile.get("is_bot") is True:
+            return True
+        return self._is_bot_login(login)
 
     @staticmethod
     def _coerce_iso(value) -> str | None:
